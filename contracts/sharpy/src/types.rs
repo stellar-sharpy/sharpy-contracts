@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env, Symbol, Vec, String};
+use soroban_sdk::{contracttype, Address, Symbol, Vec};
 
 /// Split rule for a single recipient — evaluated at release time.
 #[contracttype]
@@ -9,7 +9,8 @@ pub enum SplitRule {
     /// Pay `funded * bps / 10_000` to the recipient.
     Percentage(u32),
     /// Pay `funded * bps / 10_000` only when `funded > threshold`; else 0.
-    Tiered { threshold: i128, bps: u32 },
+    /// Encoded as (threshold, bps).
+    Tiered(i128, u32),
 }
 
 /// Action taken by an auto-resolve rule.
@@ -24,7 +25,6 @@ pub enum ResolveAction {
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct ResolveRule {
-    /// Minimum funding threshold in basis points (e.g. 5000 = 50%).
     pub min_funded_bps: u32,
     pub action: ResolveAction,
 }
@@ -75,13 +75,6 @@ pub struct InvoicePayment {
 
 #[contracttype]
 #[derive(Clone, Debug)]
-pub struct Tranche {
-    pub timestamp: u64,
-    pub basis_points: u32,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
 pub struct InvoiceOptions {
     pub escrow_enabled: bool,
     pub escrow_release_delay: Option<u64>,
@@ -117,14 +110,4 @@ pub struct Invoice {
     pub escrow_release_delay: u64,
     pub split_rules: Vec<SplitRule>,
     pub auto_resolve_rules: Vec<ResolveRule>,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct InvoiceStats {
-    pub funded: i128,
-    pub total: i128,
-    pub payment_count: u32,
-    pub unique_payers: u32,
-    pub completion_bps: u32,
 }
