@@ -1,0 +1,130 @@
+use soroban_sdk::{contracttype, Address, Env, Symbol, Vec, String};
+
+/// Split rule for a single recipient — evaluated at release time.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub enum SplitRule {
+    /// Pay this exact amount regardless of funded total.
+    Fixed(i128),
+    /// Pay `funded * bps / 10_000` to the recipient.
+    Percentage(u32),
+    /// Pay `funded * bps / 10_000` only when `funded > threshold`; else 0.
+    Tiered { threshold: i128, bps: u32 },
+}
+
+/// Action taken by an auto-resolve rule.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ResolveAction {
+    Release,
+    Refund,
+}
+
+/// Auto-resolve rule — if funded/total >= min_funded_bps/10_000, execute action.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ResolveRule {
+    /// Minimum funding threshold in basis points (e.g. 5000 = 50%).
+    pub min_funded_bps: u32,
+    pub action: ResolveAction,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum InvoiceStatus {
+    Pending,
+    Released,
+    Refunded,
+    Cancelled,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Payment {
+    pub payer: Address,
+    pub amount: i128,
+    pub tip: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AuditEntry {
+    pub action: Symbol,
+    pub actor: Address,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SubscriptionParams {
+    pub creator: Address,
+    pub recipients: Vec<Address>,
+    pub amounts: Vec<i128>,
+    pub tokens: Vec<Address>,
+    pub recurrence_interval: u64,
+    pub max_recurrences: u32,
+    pub num_created: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoicePayment {
+    pub invoice_id: u64,
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Tranche {
+    pub timestamp: u64,
+    pub basis_points: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceOptions {
+    pub escrow_enabled: bool,
+    pub escrow_release_delay: Option<u64>,
+    pub split_rules: Vec<SplitRule>,
+    pub auto_resolve_rules: Vec<ResolveRule>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CreateInvoiceParams {
+    pub recipients: Vec<Address>,
+    pub amounts: Vec<i128>,
+    pub token: Address,
+    pub deadline: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Invoice {
+    pub version: u32,
+    pub creator: Address,
+    pub recipients: Vec<Address>,
+    pub amounts: Vec<i128>,
+    pub tokens: Vec<Address>,
+    pub deadline: u64,
+    pub funded: i128,
+    pub status: InvoiceStatus,
+    pub payments: Vec<Payment>,
+    pub claimed: Vec<i128>,
+    pub frozen: bool,
+    pub completion_time: Option<u64>,
+    pub escrow_enabled: bool,
+    pub escrow_release_delay: u64,
+    pub split_rules: Vec<SplitRule>,
+    pub auto_resolve_rules: Vec<ResolveRule>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceStats {
+    pub funded: i128,
+    pub total: i128,
+    pub payment_count: u32,
+    pub unique_payers: u32,
+    pub completion_bps: u32,
+}
