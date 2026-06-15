@@ -1,5 +1,7 @@
 # Rust
-target/
+target
+sharpy
+test_snapshots//
 Cargo.lock
 *.rlib
 *.so
