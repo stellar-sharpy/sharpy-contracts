@@ -19,6 +19,15 @@
 - Creator whitelisting
 - Compliance checks
 
+## Deployments
+
+| Network | Contract ID |
+|---------|-------------|
+| Testnet | `CAYTIFPD6RFWVHMK5SPPUUIWWAAANHKOJB6GOAJS5SR5MBKZMEY2UODZ` |
+| Mainnet | _coming soon_ |
+
+- [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CAYTIFPD6RFWVHMK5SPPUUIWWAAANHKOJB6GOAJS5SR5MBKZMEY2UODZ)
+
 ## Project Structure
 
 ```
@@ -37,14 +46,13 @@ sharpy-contracts/
 ## Building
 
 ```bash
-cd contracts/sharpy
 cargo build --release --target wasm32-unknown-unknown
+stellar contract optimize --wasm target/wasm32-unknown-unknown/release/sharpy.wasm
 ```
 
 ## Testing
 
 ```bash
-cd contracts/sharpy
 cargo test
 ```
 
@@ -65,7 +73,7 @@ let invoice_id = contract.create_invoice(
     &amounts,
     &token,
     &deadline,
-    &options,
+    &options,  // InvoiceOptions { escrow_enabled, escrow_release_delay, split_rules, .. }
 );
 ```
 
@@ -118,6 +126,7 @@ Pay recipient `funded * bps / 10_000` (in basis points).
 
 ### Tiered
 Pay recipient percentage **only** if `funded > threshold`, else 0.
+Encoded as `SplitRule::Tiered(threshold, bps)`.
 
 ## License
 
