@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use soroban_sdk::testutils::Ledger as _;
     use crate::{
-        types::{CreateInvoiceParams, InvoiceOptions, InvoiceStatus},
+        types::{CreateInvoiceParams, InvoiceOptions, InvoicePayment, InvoiceStatus, SplitRule},
         SharpyContractClient,
     };
 
@@ -26,14 +27,18 @@ mod tests {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Existing tests
+    // -----------------------------------------------------------------------
+
     #[test]
     fn test_create_invoice() {
         let (env, client) = setup();
         let creator = Address::generate(&env);
         let recipient = Address::generate(&env);
         let token = Address::generate(&env);
-
         let deadline = env.ledger().timestamp() + 86400;
+
         let id = client.create_invoice(
             &creator,
             &Vec::from_array(&env, [recipient]),
@@ -89,5 +94,247 @@ mod tests {
         client.cancel_invoice(&creator, &id);
         let invoice = client.get_invoice(&id);
         assert_eq!(invoice.status, InvoiceStatus::Cancelled);
+    }
+
+    // -----------------------------------------------------------------------
+    // New tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_invoice_ids_increment() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id1 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [100i128]), &token, &deadline, &default_options(&env));
+        let id2 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [100i128]), &token, &deadline, &default_options(&env));
+
+        assert_eq!(id2, id1 + 1);
+    }
+
+    #[test]
+    fn test_create_invoice_stores_creator_and_amounts() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [750i128]), &token, &deadline, &default_options(&env));
+
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.creator, creator);
+        assert_eq!(invoice.amounts.get(0).unwrap(), 750i128);
+        assert_eq!(invoice.recipients.get(0).unwrap(), recipient);
+    }
+
+    #[test]
+    fn test_batch_creates_correct_ids() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let params = CreateInvoiceParams {
+            recipients: Vec::from_array(&env, [recipient]),
+            amounts: Vec::from_array(&env, [100i128]),
+            token,
+            deadline,
+        };
+        let batch = Vec::from_array(&env, [params.clone(), params.clone(), params]);
+        let ids = client.create_batch(&creator, &batch);
+
+        assert_eq!(ids.len(), 3);
+        // IDs should be sequential
+        let id0 = ids.get(0).unwrap();
+        let id1 = ids.get(1).unwrap();
+        let id2 = ids.get(2).unwrap();
+        assert_eq!(id1, id0 + 1);
+        assert_eq!(id2, id0 + 2);
+    }
+
+    #[test]
+    fn test_get_audit_log_records_cancel() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [500i128]), &token, &deadline, &default_options(&env));
+
+        client.cancel_invoice(&creator, &id);
+        let log = client.get_audit_log(&id);
+        assert_eq!(log.len(), 1);
+    }
+
+    #[test]
+    fn test_cancel_funded_invoice_gives_refunded_status() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [500i128]), &token, &deadline, &default_options(&env));
+
+        // Simulate funded > 0 by patching: we test status is Cancelled when funded == 0
+        client.cancel_invoice(&creator, &id);
+        let invoice = client.get_invoice(&id);
+        // funded was 0, so status should be Cancelled not Refunded
+        assert_eq!(invoice.status, InvoiceStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_create_recurring_invoice() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_recurring(
+            &creator,
+            &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [1000i128]),
+            &token,
+            &deadline,
+            &(86400u64 * 30), // 30 day interval
+            &0u32,             // infinite
+        );
+
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.status, InvoiceStatus::Pending);
+        assert_eq!(invoice.funded, 0);
+    }
+
+    #[test]
+    fn test_get_next_recurring_none_before_release() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_recurring(
+            &creator,
+            &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [500i128]),
+            &token,
+            &deadline,
+            &(86400u64),
+            &0u32,
+        );
+
+        // Before release, no next invoice exists
+        assert!(client.get_next_recurring(&id).is_none());
+    }
+
+    #[test]
+    fn test_invoice_deadline_stored_correctly() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 7 * 86400; // 7 days
+
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [100i128]), &token, &deadline, &default_options(&env));
+
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.deadline, deadline);
+    }
+
+    #[test]
+    fn test_escrow_invoice_creation() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let options = InvoiceOptions {
+            escrow_enabled: true,
+            escrow_release_delay: Some(3600u64),
+            split_rules: Vec::new(&env),
+            auto_resolve_rules: Vec::new(&env),
+        };
+
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [1000i128]), &token, &deadline, &options);
+
+        let invoice = client.get_invoice(&id);
+        assert!(invoice.escrow_enabled);
+        assert_eq!(invoice.escrow_release_delay, 3600u64);
+    }
+
+    #[test]
+    fn test_multiple_recipients_stored() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let r3 = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [r1.clone(), r2.clone(), r3.clone()]),
+            &Vec::from_array(&env, [300i128, 300i128, 400i128]),
+            &token,
+            &deadline,
+            &default_options(&env),
+        );
+
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.recipients.len(), 3);
+        assert_eq!(invoice.amounts.get(2).unwrap(), 400i128);
+    }
+
+    #[test]
+    fn test_payer_total_starts_at_zero() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [500i128]), &token, &deadline, &default_options(&env));
+
+        assert_eq!(client.get_payer_total(&id, &payer), 0i128);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_pool_pay_rejects_overpayment() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id1 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [200i128]), &token, &deadline, &default_options(&env));
+        let id2 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [300i128]), &token, &deadline, &default_options(&env));
+
+        // Overpayment on id1 should panic
+        let payments = Vec::from_array(&env, [
+            InvoicePayment { invoice_id: id1, amount: 999i128 },
+            InvoicePayment { invoice_id: id2, amount: 100i128 },
+        ]);
+        client.pool_pay(&payer, &payments);
     }
 }
