@@ -43,6 +43,8 @@ fn load_invoice(env: &Env, id: u64) -> Invoice {
 
 fn save_invoice(env: &Env, id: u64, invoice: &Invoice) {
     env.storage().persistent().set(&invoice_key(id), invoice);
+    // Extend TTL to ~1 year (in ledgers at ~5s each: 365*24*3600/5 = 6_307_200)
+    env.storage().persistent().extend_ttl(&invoice_key(id), 100_000, 6_307_200);
 }
 
 fn append_audit(env: &Env, id: u64, action: Symbol, actor: &Address) {
