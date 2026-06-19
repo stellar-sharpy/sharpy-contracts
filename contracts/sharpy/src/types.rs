@@ -87,7 +87,7 @@ pub struct InvoiceOptions {
 pub struct CreateInvoiceParams {
     pub recipients: Vec<Address>,
     pub amounts: Vec<i128>,
-    pub token: Address,
+    pub tokens: Vec<Address>,
     pub deadline: u64,
 }
 

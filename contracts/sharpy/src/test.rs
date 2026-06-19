@@ -43,7 +43,7 @@ mod tests {
             &creator,
             &Vec::from_array(&env, [recipient]),
             &Vec::from_array(&env, [1000i128]),
-            &token,
+            &Vec::from_array(&env, [token]),
             &deadline,
             &default_options(&env),
         );
@@ -65,7 +65,7 @@ mod tests {
         let params = CreateInvoiceParams {
             recipients: Vec::from_array(&env, [recipient.clone()]),
             amounts: Vec::from_array(&env, [500i128]),
-            token: token.clone(),
+            tokens: Vec::from_array(&env, [token.clone()]),
             deadline,
         };
         let batch = Vec::from_array(&env, [params.clone(), params]);
@@ -86,7 +86,7 @@ mod tests {
             &creator,
             &Vec::from_array(&env, [recipient]),
             &Vec::from_array(&env, [1000i128]),
-            &token,
+            &Vec::from_array(&env, [token]),
             &deadline,
             &default_options(&env),
         );
@@ -109,9 +109,11 @@ mod tests {
         let deadline = env.ledger().timestamp() + 86400;
 
         let id1 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]),
-            &Vec::from_array(&env, [100i128]), &token, &deadline, &default_options(&env));
+            &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token.clone()]),
+            &deadline, &default_options(&env));
         let id2 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
-            &Vec::from_array(&env, [100i128]), &token, &deadline, &default_options(&env));
+            &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]),
+            &deadline, &default_options(&env));
 
         assert_eq!(id2, id1 + 1);
     }
@@ -125,7 +127,8 @@ mod tests {
         let deadline = env.ledger().timestamp() + 86400;
 
         let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]),
-            &Vec::from_array(&env, [750i128]), &token, &deadline, &default_options(&env));
+            &Vec::from_array(&env, [750i128]), &Vec::from_array(&env, [token]),
+            &deadline, &default_options(&env));
 
         let invoice = client.get_invoice(&id);
         assert_eq!(invoice.creator, creator);
@@ -144,14 +147,13 @@ mod tests {
         let params = CreateInvoiceParams {
             recipients: Vec::from_array(&env, [recipient]),
             amounts: Vec::from_array(&env, [100i128]),
-            token,
+            tokens: Vec::from_array(&env, [token]),
             deadline,
         };
         let batch = Vec::from_array(&env, [params.clone(), params.clone(), params]);
         let ids = client.create_batch(&creator, &batch);
 
         assert_eq!(ids.len(), 3);
-        // IDs should be sequential
         let id0 = ids.get(0).unwrap();
         let id1 = ids.get(1).unwrap();
         let id2 = ids.get(2).unwrap();
@@ -168,7 +170,8 @@ mod tests {
         let deadline = env.ledger().timestamp() + 86400;
 
         let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
-            &Vec::from_array(&env, [500i128]), &token, &deadline, &default_options(&env));
+            &Vec::from_array(&env, [500i128]), &Vec::from_array(&env, [token]),
+            &deadline, &default_options(&env));
 
         client.cancel_invoice(&creator, &id);
         let log = client.get_audit_log(&id);
@@ -184,12 +187,11 @@ mod tests {
         let deadline = env.ledger().timestamp() + 86400;
 
         let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
-            &Vec::from_array(&env, [500i128]), &token, &deadline, &default_options(&env));
+            &Vec::from_array(&env, [500i128]), &Vec::from_array(&env, [token]),
+            &deadline, &default_options(&env));
 
-        // Simulate funded > 0 by patching: we test status is Cancelled when funded == 0
         client.cancel_invoice(&creator, &id);
         let invoice = client.get_invoice(&id);
-        // funded was 0, so status should be Cancelled not Refunded
         assert_eq!(invoice.status, InvoiceStatus::Cancelled);
     }
 
@@ -205,10 +207,10 @@ mod tests {
             &creator,
             &Vec::from_array(&env, [recipient]),
             &Vec::from_array(&env, [1000i128]),
-            &token,
+            &Vec::from_array(&env, [token]),
             &deadline,
-            &(86400u64 * 30), // 30 day interval
-            &0u32,             // infinite
+            &(86400u64 * 30),
+            &0u32,
         );
 
         let invoice = client.get_invoice(&id);
@@ -228,13 +230,12 @@ mod tests {
             &creator,
             &Vec::from_array(&env, [recipient]),
             &Vec::from_array(&env, [500i128]),
-            &token,
+            &Vec::from_array(&env, [token]),
             &deadline,
             &(86400u64),
             &0u32,
         );
 
-        // Before release, no next invoice exists
         assert!(client.get_next_recurring(&id).is_none());
     }
 
@@ -244,10 +245,11 @@ mod tests {
         let creator = Address::generate(&env);
         let recipient = Address::generate(&env);
         let token = Address::generate(&env);
-        let deadline = env.ledger().timestamp() + 7 * 86400; // 7 days
+        let deadline = env.ledger().timestamp() + 7 * 86400;
 
         let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
-            &Vec::from_array(&env, [100i128]), &token, &deadline, &default_options(&env));
+            &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]),
+            &deadline, &default_options(&env));
 
         let invoice = client.get_invoice(&id);
         assert_eq!(invoice.deadline, deadline);
@@ -269,7 +271,8 @@ mod tests {
         };
 
         let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
-            &Vec::from_array(&env, [1000i128]), &token, &deadline, &options);
+            &Vec::from_array(&env, [1000i128]), &Vec::from_array(&env, [token]),
+            &deadline, &options);
 
         let invoice = client.get_invoice(&id);
         assert!(invoice.escrow_enabled);
@@ -283,14 +286,16 @@ mod tests {
         let r1 = Address::generate(&env);
         let r2 = Address::generate(&env);
         let r3 = Address::generate(&env);
-        let token = Address::generate(&env);
+        let t1 = Address::generate(&env);
+        let t2 = Address::generate(&env);
+        let t3 = Address::generate(&env);
         let deadline = env.ledger().timestamp() + 86400;
 
         let id = client.create_invoice(
             &creator,
             &Vec::from_array(&env, [r1.clone(), r2.clone(), r3.clone()]),
             &Vec::from_array(&env, [300i128, 300i128, 400i128]),
-            &token,
+            &Vec::from_array(&env, [t1, t2, t3]),
             &deadline,
             &default_options(&env),
         );
@@ -298,6 +303,7 @@ mod tests {
         let invoice = client.get_invoice(&id);
         assert_eq!(invoice.recipients.len(), 3);
         assert_eq!(invoice.amounts.get(2).unwrap(), 400i128);
+        assert_eq!(invoice.tokens.len(), 3);
     }
 
     #[test]
@@ -310,7 +316,8 @@ mod tests {
         let deadline = env.ledger().timestamp() + 86400;
 
         let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
-            &Vec::from_array(&env, [500i128]), &token, &deadline, &default_options(&env));
+            &Vec::from_array(&env, [500i128]), &Vec::from_array(&env, [token]),
+            &deadline, &default_options(&env));
 
         assert_eq!(client.get_payer_total(&id, &payer), 0i128);
     }
@@ -326,15 +333,61 @@ mod tests {
         let deadline = env.ledger().timestamp() + 86400;
 
         let id1 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]),
-            &Vec::from_array(&env, [200i128]), &token, &deadline, &default_options(&env));
+            &Vec::from_array(&env, [200i128]), &Vec::from_array(&env, [token.clone()]),
+            &deadline, &default_options(&env));
         let id2 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
-            &Vec::from_array(&env, [300i128]), &token, &deadline, &default_options(&env));
+            &Vec::from_array(&env, [300i128]), &Vec::from_array(&env, [token]),
+            &deadline, &default_options(&env));
 
-        // Overpayment on id1 should panic
         let payments = Vec::from_array(&env, [
             InvoicePayment { invoice_id: id1, amount: 999i128 },
             InvoicePayment { invoice_id: id2, amount: 100i128 },
         ]);
         client.pool_pay(&payer, &payments);
+    }
+
+    #[test]
+    fn test_multi_token_invoice_stores_per_recipient_tokens() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let usdc = Address::generate(&env);
+        let xlm = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [r1, r2]),
+            &Vec::from_array(&env, [500i128, 300i128]),
+            &Vec::from_array(&env, [usdc.clone(), xlm.clone()]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.tokens.get(0).unwrap(), usdc);
+        assert_eq!(invoice.tokens.get(1).unwrap(), xlm);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_create_invoice_rejects_token_length_mismatch() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        // 2 recipients but only 1 token — should panic
+        client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [r1, r2]),
+            &Vec::from_array(&env, [500i128, 300i128]),
+            &Vec::from_array(&env, [token]),
+            &deadline,
+            &default_options(&env),
+        );
     }
 }
