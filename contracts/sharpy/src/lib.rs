@@ -65,16 +65,14 @@ fn build_invoice(
     creator: Address,
     recipients: Vec<Address>,
     amounts: Vec<i128>,
-    token: Address,
+    tokens: Vec<Address>,
     deadline: u64,
     escrow_enabled: bool,
     escrow_release_delay: u64,
     split_rules: Vec<SplitRule>,
 ) -> Invoice {
-    let mut tokens: Vec<Address> = Vec::new(env);
     let mut claimed: Vec<i128> = Vec::new(env);
     for _ in recipients.iter() {
-        tokens.push_back(token.clone());
         claimed.push_back(0i128);
     }
     Invoice {
@@ -124,13 +122,14 @@ impl SharpyContract {
         creator: Address,
         recipients: Vec<Address>,
         amounts: Vec<i128>,
-        token: Address,
+        tokens: Vec<Address>,
         deadline: u64,
         options: InvoiceOptions,
     ) -> u64 {
         require_not_paused(&env);
         creator.require_auth();
         assert_eq!(recipients.len(), amounts.len(), "recipients and amounts length mismatch");
+        assert_eq!(recipients.len(), tokens.len(), "recipients and tokens length mismatch");
         assert!(!recipients.is_empty(), "must have at least one recipient");
         assert!(deadline > env.ledger().timestamp(), "deadline must be in the future");
         for amt in amounts.iter() {
@@ -139,7 +138,7 @@ impl SharpyContract {
 
         let id = bump_counter(&env);
         let invoice = build_invoice(
-            &env, creator.clone(), recipients, amounts, token, deadline,
+            &env, creator.clone(), recipients, amounts, tokens, deadline,
             options.escrow_enabled, options.escrow_release_delay.unwrap_or(0), options.split_rules,
         );
         save_invoice(&env, id, &invoice);
@@ -154,10 +153,11 @@ impl SharpyContract {
 
         let mut ids: Vec<u64> = Vec::new(&env);
         for params in invoices.iter() {
+            assert_eq!(params.recipients.len(), params.tokens.len(), "recipients and tokens length mismatch");
             let id = bump_counter(&env);
             let invoice = build_invoice(
                 &env, creator.clone(), params.recipients.clone(), params.amounts.clone(),
-                params.token.clone(), params.deadline, false, 0, Vec::new(&env),
+                params.tokens.clone(), params.deadline, false, 0, Vec::new(&env),
             );
             save_invoice(&env, id, &invoice);
             events::invoice_created(&env, id, &creator);
@@ -171,7 +171,7 @@ impl SharpyContract {
         creator: Address,
         recipients: Vec<Address>,
         amounts: Vec<i128>,
-        token: Address,
+        tokens: Vec<Address>,
         deadline: u64,
         recurrence_interval: u64,
         max_recurrences: u32,
@@ -179,22 +179,21 @@ impl SharpyContract {
         require_not_paused(&env);
         creator.require_auth();
         assert_eq!(recipients.len(), amounts.len(), "recipients and amounts length mismatch");
+        assert_eq!(recipients.len(), tokens.len(), "recipients and tokens length mismatch");
         assert!(recurrence_interval > 0, "recurrence_interval must be positive");
 
         let id = bump_counter(&env);
         let invoice = build_invoice(
             &env, creator.clone(), recipients.clone(), amounts.clone(),
-            token.clone(), deadline, false, 0, Vec::new(&env),
+            tokens.clone(), deadline, false, 0, Vec::new(&env),
         );
         save_invoice(&env, id, &invoice);
 
-        let mut token_vec: Vec<Address> = Vec::new(&env);
-        token_vec.push_back(token);
         let params = SubscriptionParams {
             creator: creator.clone(),
             recipients,
             amounts,
-            tokens: token_vec,
+            tokens,
             recurrence_interval,
             max_recurrences,
             num_created: 1,
@@ -286,7 +285,6 @@ impl SharpyContract {
     fn _release(env: &Env, invoice_id: u64, invoice: &mut Invoice, actor: &Address) {
         assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
 
-        let token_client = token::Client::new(env, &invoice.tokens.get(0).expect("no token"));
         let total: i128 = invoice.amounts.iter().sum();
         let n = invoice.recipients.len();
         let mut distributed: i128 = 0;
@@ -294,6 +292,7 @@ impl SharpyContract {
         for i in 0..n {
             let recipient = invoice.recipients.get(i).unwrap();
             let amount = invoice.amounts.get(i).unwrap();
+            let token_client = token::Client::new(env, &invoice.tokens.get(i).expect("no token"));
 
             let proportional = if !invoice.split_rules.is_empty() {
                 match invoice.split_rules.get(i as u32).unwrap() {
@@ -333,12 +332,11 @@ impl SharpyContract {
         {
             if params.max_recurrences == 0 || params.num_created < params.max_recurrences {
                 let next_deadline = env.ledger().timestamp() + params.recurrence_interval;
-                let token = params.tokens.get(0).expect("no token");
                 let next_id = bump_counter(env);
 
                 let next_invoice = build_invoice(
                     env, params.creator.clone(), params.recipients.clone(),
-                    params.amounts.clone(), token, next_deadline, false, 0, Vec::new(env),
+                    params.amounts.clone(), params.tokens.clone(), next_deadline, false, 0, Vec::new(env),
                 );
                 save_invoice(env, next_id, &next_invoice);
 
