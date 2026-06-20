@@ -1,11 +1,26 @@
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
     use soroban_sdk::testutils::Ledger as _;
     use crate::{
         types::{CreateInvoiceParams, InvoiceOptions, InvoicePayment, InvoiceStatus, SplitRule},
         SharpyContractClient,
     };
+
+    fn setup_with_tokens(
+        env: &Env,
+        payer: &Address,
+        amounts: &[i128],
+    ) -> (Address, Address) {
+        let admin = Address::generate(env);
+        let token_a = env.register_stellar_asset_contract(admin.clone());
+        let token_b = env.register_stellar_asset_contract(admin);
+        let sac_a = token::StellarAssetClient::new(env, &token_a);
+        let sac_b = token::StellarAssetClient::new(env, &token_b);
+        sac_a.mint(payer, &amounts[0]);
+        sac_b.mint(payer, &amounts[1]);
+        (token_a, token_b)
+    }
 
     fn setup() -> (Env, SharpyContractClient<'static>) {
         let env = Env::default();
@@ -389,5 +404,128 @@ mod tests {
             &deadline,
             &default_options(&env),
         );
+    }
+
+    #[test]
+    fn test_pool_pay_multi_token() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token_a, token_b) = setup_with_tokens(&env, &payer, &[1000i128, 1000i128]);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id1 = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [500i128]),
+            &Vec::from_array(&env, [token_a.clone()]),
+            &deadline,
+            &default_options(&env),
+        );
+        let id2 = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [300i128]),
+            &Vec::from_array(&env, [token_b.clone()]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        let payments = Vec::from_array(&env, [
+            InvoicePayment { invoice_id: id1, amount: 500i128 },
+            InvoicePayment { invoice_id: id2, amount: 300i128 },
+        ]);
+        client.pool_pay(&payer, &payments);
+
+        let inv1 = client.get_invoice(&id1);
+        assert_eq!(inv1.funded, 500i128);
+        assert_eq!(inv1.status, InvoiceStatus::Released);
+
+        let inv2 = client.get_invoice(&id2);
+        assert_eq!(inv2.funded, 300i128);
+        assert_eq!(inv2.status, InvoiceStatus::Released);
+    }
+
+    #[test]
+    fn test_pool_pay_multi_token_same_token_grouped() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token, _) = setup_with_tokens(&env, &payer, &[1000, 1000]);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id1 = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [200i128]),
+            &Vec::from_array(&env, [token.clone()]),
+            &deadline,
+            &default_options(&env),
+        );
+        let id2 = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [300i128]),
+            &Vec::from_array(&env, [token.clone()]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        let payments = Vec::from_array(&env, [
+            InvoicePayment { invoice_id: id1, amount: 200i128 },
+            InvoicePayment { invoice_id: id2, amount: 300i128 },
+        ]);
+        client.pool_pay(&payer, &payments);
+
+        let inv1 = client.get_invoice(&id1);
+        assert_eq!(inv1.funded, 200i128);
+        assert_eq!(inv1.status, InvoiceStatus::Released);
+
+        let inv2 = client.get_invoice(&id2);
+        assert_eq!(inv2.funded, 300i128);
+        assert_eq!(inv2.status, InvoiceStatus::Released);
+    }
+
+    #[test]
+    fn test_pool_pay_partial_multi_token() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token_a, token_b) = setup_with_tokens(&env, &payer, &[1000i128, 1000i128]);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id1 = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [1000i128]),
+            &Vec::from_array(&env, [token_a.clone()]),
+            &deadline,
+            &default_options(&env),
+        );
+        let id2 = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [1000i128]),
+            &Vec::from_array(&env, [token_b]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        let payments = Vec::from_array(&env, [
+            InvoicePayment { invoice_id: id1, amount: 400i128 },
+            InvoicePayment { invoice_id: id2, amount: 600i128 },
+        ]);
+        client.pool_pay(&payer, &payments);
+
+        let inv1 = client.get_invoice(&id1);
+        assert_eq!(inv1.funded, 400i128);
+        assert_eq!(inv1.status, InvoiceStatus::Pending);
+
+        let inv2 = client.get_invoice(&id2);
+        assert_eq!(inv2.funded, 600i128);
+        assert_eq!(inv2.status, InvoiceStatus::Pending);
     }
 }

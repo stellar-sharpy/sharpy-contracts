@@ -241,20 +241,26 @@ impl SharpyContract {
         payer.require_auth();
         assert!(!payments.is_empty(), "payments must not be empty");
 
-        let mut total: i128 = 0;
+        // Phase 1: Validate all invoices and group totals by token
+        let mut token_totals: Map<Address, i128> = Map::new(&env);
         for p in payments.iter() {
             let inv = load_invoice(&env, p.invoice_id);
             assert!(inv.status == InvoiceStatus::Pending, "invoice is not pending");
             assert!(p.amount > 0, "payment amount must be positive");
             let inv_total: i128 = inv.amounts.iter().sum();
             assert!(inv.funded + p.amount <= inv_total, "payment exceeds remaining balance");
-            total += p.amount;
+            let token = inv.tokens.get(0).expect("no token");
+            let prev = token_totals.get(token.clone()).unwrap_or(0);
+            token_totals.set(token, prev + p.amount);
         }
 
-        let first = load_invoice(&env, payments.get(0).unwrap().invoice_id);
-        let token_client = token::Client::new(&env, &first.tokens.get(0).expect("no token"));
-        token_client.transfer(&payer, &env.current_contract_address(), &total);
+        // Phase 2: Transfer tokens — one transfer per unique token
+        for (token, amount) in token_totals.iter() {
+            let token_client = token::Client::new(&env, &token);
+            token_client.transfer(&payer, &env.current_contract_address(), &amount);
+        }
 
+        // Phase 3: Update each invoice's state
         for p in payments.iter() {
             let mut inv = load_invoice(&env, p.invoice_id);
             inv.payments.push_back(Payment { payer: payer.clone(), amount: p.amount, tip: 0 });
@@ -262,8 +268,14 @@ impl SharpyContract {
             append_audit(&env, p.invoice_id, symbol_short!("pool_pay"), &payer);
             events::payment_received(&env, p.invoice_id, &payer, p.amount);
             let inv_total: i128 = inv.amounts.iter().sum();
-            if inv.funded >= inv_total && !inv.escrow_enabled {
-                Self::_release(&env, p.invoice_id, &mut inv, &payer);
+            if inv.funded >= inv_total {
+                if inv.escrow_enabled {
+                    let release_at = env.ledger().timestamp() + inv.escrow_release_delay;
+                    env.storage().persistent().set(&escrow_state_key(p.invoice_id), &release_at);
+                    save_invoice(&env, p.invoice_id, &inv);
+                } else {
+                    Self::_release(&env, p.invoice_id, &mut inv, &payer);
+                }
             } else {
                 save_invoice(&env, p.invoice_id, &inv);
             }
