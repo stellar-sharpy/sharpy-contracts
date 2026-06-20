@@ -75,11 +75,20 @@ pub struct InvoicePayment {
 
 #[contracttype]
 #[derive(Clone, Debug)]
+pub struct DisputeState {
+    pub release_at: u64,
+    pub disputed: bool,
+    pub disputed_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
 pub struct InvoiceOptions {
     pub escrow_enabled: bool,
     pub escrow_release_delay: Option<u64>,
     pub split_rules: Vec<SplitRule>,
     pub auto_resolve_rules: Vec<ResolveRule>,
+    pub arbitrator: Option<Address>,
 }
 
 #[contracttype]
@@ -110,4 +119,5 @@ pub struct Invoice {
     pub escrow_release_delay: u64,
     pub split_rules: Vec<SplitRule>,
     pub auto_resolve_rules: Vec<ResolveRule>,
+    pub arbitrator: Option<Address>,
 }
