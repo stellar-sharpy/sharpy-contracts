@@ -324,7 +324,7 @@ impl SharpyContract {
         invoice.completion_time = Some(env.ledger().timestamp());
         save_invoice(env, invoice_id, invoice);
         append_audit(env, invoice_id, symbol_short!("release"), actor);
-        events::invoice_released(env, invoice_id, &invoice.recipients);
+        events::invoice_released(env, invoice_id, invoice.funded, n as u32, &invoice.creator);
 
         // Spin up next recurring invoice if configured
         if let Some(params) = env.storage().persistent()
@@ -377,7 +377,8 @@ impl SharpyContract {
         invoice.completion_time = Some(env.ledger().timestamp());
         save_invoice(&env, invoice_id, &invoice);
         append_audit(&env, invoice_id, symbol_short!("refund"), &env.current_contract_address());
-        events::invoice_refunded(&env, invoice_id);
+        let recipient_count = invoice.recipients.len() as u32;
+        events::invoice_refunded(&env, invoice_id, invoice.funded, recipient_count, &invoice.creator);
     }
 
     pub fn cancel_invoice(env: Env, caller: Address, invoice_id: u64) {
