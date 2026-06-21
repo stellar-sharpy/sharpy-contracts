@@ -54,3 +54,26 @@ pub fn invoice_refunded(env: &Env, id: u64) {
 pub fn payer_refunded(env: &Env, invoice_id: u64, payer: &Address, amount: i128) {
     env.events().publish((symbol_short!("pyr"),), PayerRefundedEvent { invoice_id, payer: payer.clone(), amount });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct DisputeRaisedEvent {
+    pub invoice_id: u64,
+    pub creator: Address,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct DisputeResolvedEvent {
+    pub invoice_id: u64,
+    pub resolver: Address,
+    pub release: bool,
+}
+
+pub fn dispute_raised(env: &Env, invoice_id: u64, creator: &Address) {
+    env.events().publish((symbol_short!("dispute"),), DisputeRaisedEvent { invoice_id, creator: creator.clone() });
+}
+
+pub fn dispute_resolved(env: &Env, invoice_id: u64, resolver: &Address, release: bool) {
+    env.events().publish((symbol_short!("dsprslv"),), DisputeResolvedEvent { invoice_id, resolver: resolver.clone(), release });
+}
