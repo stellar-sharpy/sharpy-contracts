@@ -10,7 +10,7 @@ mod test;
 
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Map, Symbol, Vec};
 use types::{
-    AuditEntry, CreateInvoiceParams, Invoice, InvoiceOptions, InvoicePayment,
+    AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceOptions, InvoicePayment,
     InvoiceStatus, Payment, SplitRule, SubscriptionParams,
 };
 
@@ -70,6 +70,7 @@ fn build_invoice(
     escrow_enabled: bool,
     escrow_release_delay: u64,
     split_rules: Vec<SplitRule>,
+    arbitrator: Option<Address>,
 ) -> Invoice {
     let mut claimed: Vec<i128> = Vec::new(env);
     for _ in recipients.iter() {
@@ -92,6 +93,7 @@ fn build_invoice(
         escrow_release_delay,
         split_rules,
         auto_resolve_rules: Vec::new(env),
+        arbitrator,
     }
 }
 
@@ -140,6 +142,7 @@ impl SharpyContract {
         let invoice = build_invoice(
             &env, creator.clone(), recipients, amounts, tokens, deadline,
             options.escrow_enabled, options.escrow_release_delay.unwrap_or(0), options.split_rules,
+            options.arbitrator,
         );
         save_invoice(&env, id, &invoice);
         events::invoice_created(&env, id, &creator);
@@ -157,7 +160,7 @@ impl SharpyContract {
             let id = bump_counter(&env);
             let invoice = build_invoice(
                 &env, creator.clone(), params.recipients.clone(), params.amounts.clone(),
-                params.tokens.clone(), params.deadline, false, 0, Vec::new(&env),
+                params.tokens.clone(), params.deadline, false, 0, Vec::new(&env), None,
             );
             save_invoice(&env, id, &invoice);
             events::invoice_created(&env, id, &creator);
@@ -185,7 +188,7 @@ impl SharpyContract {
         let id = bump_counter(&env);
         let invoice = build_invoice(
             &env, creator.clone(), recipients.clone(), amounts.clone(),
-            tokens.clone(), deadline, false, 0, Vec::new(&env),
+            tokens.clone(), deadline, false, 0, Vec::new(&env), None,
         );
         save_invoice(&env, id, &invoice);
 
@@ -226,7 +229,8 @@ impl SharpyContract {
         if invoice.funded >= total {
             if invoice.escrow_enabled {
                 let release_at = env.ledger().timestamp() + invoice.escrow_release_delay;
-                env.storage().persistent().set(&escrow_state_key(invoice_id), &release_at);
+                let state = DisputeState { release_at, disputed: false, disputed_at: 0 };
+                env.storage().persistent().set(&escrow_state_key(invoice_id), &state);
                 save_invoice(&env, invoice_id, &invoice);
             } else {
                 Self::_release(&env, invoice_id, &mut invoice, &payer);
@@ -271,7 +275,8 @@ impl SharpyContract {
             if inv.funded >= inv_total {
                 if inv.escrow_enabled {
                     let release_at = env.ledger().timestamp() + inv.escrow_release_delay;
-                    env.storage().persistent().set(&escrow_state_key(p.invoice_id), &release_at);
+                    let state = DisputeState { release_at, disputed: false, disputed_at: 0 };
+                    env.storage().persistent().set(&escrow_state_key(p.invoice_id), &state);
                     save_invoice(&env, p.invoice_id, &inv);
                 } else {
                     Self::_release(&env, p.invoice_id, &mut inv, &payer);
@@ -286,12 +291,69 @@ impl SharpyContract {
         require_not_paused(&env);
         let mut invoice = load_invoice(&env, invoice_id);
         assert!(invoice.escrow_enabled, "escrow not enabled on this invoice");
-        let release_at: u64 = env.storage().persistent()
+        let state: DisputeState = env.storage().persistent()
             .get(&escrow_state_key(invoice_id)).expect("escrow not found");
-        assert!(env.ledger().timestamp() >= release_at, "escrow delay not yet met");
+        assert!(!state.disputed, "release is disputed, use resolve_dispute");
+        assert!(env.ledger().timestamp() >= state.release_at, "escrow delay not yet met");
         let caller = env.current_contract_address();
         Self::_release(&env, invoice_id, &mut invoice, &caller);
         env.storage().persistent().remove(&escrow_state_key(invoice_id));
+    }
+
+    pub fn dispute_release(env: Env, invoice_id: u64) {
+        require_not_paused(&env);
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
+        assert!(invoice.escrow_enabled, "escrow not enabled on this invoice");
+        invoice.creator.require_auth();
+
+        let state: DisputeState = env.storage().persistent()
+            .get(&escrow_state_key(invoice_id)).expect("escrow not found");
+        assert!(!state.disputed, "dispute already raised");
+        assert!(env.ledger().timestamp() < state.release_at, "escrow delay has passed, cannot dispute");
+
+        let new_state = DisputeState { disputed: true, disputed_at: env.ledger().timestamp(), ..state };
+        env.storage().persistent().set(&escrow_state_key(invoice_id), &new_state);
+        append_audit(&env, invoice_id, symbol_short!("dispute"), &invoice.creator);
+        events::dispute_raised(&env, invoice_id, &invoice.creator);
+    }
+
+    pub fn resolve_dispute(env: Env, invoice_id: u64, release: bool) {
+        require_not_paused(&env);
+        let mut invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
+
+        let state: DisputeState = env.storage().persistent()
+            .get(&escrow_state_key(invoice_id)).expect("escrow not found");
+        assert!(state.disputed, "no active dispute");
+
+        let resolver = invoice.arbitrator.clone().unwrap_or_else(|| invoice.creator.clone());
+        resolver.require_auth();
+
+        env.storage().persistent().remove(&escrow_state_key(invoice_id));
+
+        if release {
+            Self::_release(&env, invoice_id, &mut invoice, &resolver);
+        } else {
+            let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
+            let mut totals: Map<Address, i128> = Map::new(&env);
+            for payment in invoice.payments.iter() {
+                let prev = totals.get(payment.payer.clone()).unwrap_or(0);
+                totals.set(payment.payer.clone(), prev + payment.amount);
+            }
+            for (payer, amount) in totals.iter() {
+                token_client.transfer(&env.current_contract_address(), &payer, &amount);
+                events::payer_refunded(&env, invoice_id, &payer, amount);
+            }
+
+            invoice.status = InvoiceStatus::Refunded;
+            invoice.completion_time = Some(env.ledger().timestamp());
+            save_invoice(&env, invoice_id, &invoice);
+            append_audit(&env, invoice_id, symbol_short!("resolve"), &resolver);
+            events::invoice_refunded(&env, invoice_id);
+        }
+
+        events::dispute_resolved(&env, invoice_id, &resolver, release);
     }
 
     fn _release(env: &Env, invoice_id: u64, invoice: &mut Invoice, actor: &Address) {
@@ -336,7 +398,7 @@ impl SharpyContract {
         invoice.completion_time = Some(env.ledger().timestamp());
         save_invoice(env, invoice_id, invoice);
         append_audit(env, invoice_id, symbol_short!("release"), actor);
-        events::invoice_released(env, invoice_id, &invoice.recipients);
+        events::invoice_released(env, invoice_id, invoice.funded, n as u32, &invoice.creator);
 
         // Spin up next recurring invoice if configured
         if let Some(params) = env.storage().persistent()
@@ -348,7 +410,7 @@ impl SharpyContract {
 
                 let next_invoice = build_invoice(
                     env, params.creator.clone(), params.recipients.clone(),
-                    params.amounts.clone(), params.tokens.clone(), next_deadline, false, 0, Vec::new(env),
+                    params.amounts.clone(), params.tokens.clone(), next_deadline, false, 0, Vec::new(env), None,
                 );
                 save_invoice(env, next_id, &next_invoice);
 
@@ -389,7 +451,8 @@ impl SharpyContract {
         invoice.completion_time = Some(env.ledger().timestamp());
         save_invoice(&env, invoice_id, &invoice);
         append_audit(&env, invoice_id, symbol_short!("refund"), &env.current_contract_address());
-        events::invoice_refunded(&env, invoice_id);
+        let recipient_count = invoice.recipients.len() as u32;
+        events::invoice_refunded(&env, invoice_id, invoice.funded, recipient_count, &invoice.creator);
     }
 
     pub fn cancel_invoice(env: Env, caller: Address, invoice_id: u64) {
@@ -433,5 +496,9 @@ impl SharpyContract {
 
     pub fn get_next_recurring(env: Env, invoice_id: u64) -> Option<u64> {
         env.storage().persistent().get(&next_invoice_key(invoice_id))
+    }
+
+    pub fn get_escrow_state(env: Env, invoice_id: u64) -> Option<DisputeState> {
+        env.storage().persistent().get(&escrow_state_key(invoice_id))
     }
 }
