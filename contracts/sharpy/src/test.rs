@@ -7,6 +7,21 @@ mod tests {
         SharpyContractClient,
     };
 
+    fn setup_with_tokens(
+        env: &Env,
+        payer: &Address,
+        amounts: &[i128],
+    ) -> (Address, Address) {
+        let admin = Address::generate(env);
+        let token_a = env.register_stellar_asset_contract(admin.clone());
+        let token_b = env.register_stellar_asset_contract(admin);
+        let sac_a = token::StellarAssetClient::new(env, &token_a);
+        let sac_b = token::StellarAssetClient::new(env, &token_b);
+        sac_a.mint(payer, &amounts[0]);
+        sac_b.mint(payer, &amounts[1]);
+        (token_a, token_b)
+    }
+
     fn setup() -> (Env, SharpyContractClient<'static>) {
         let env = Env::default();
         env.mock_all_auths();
