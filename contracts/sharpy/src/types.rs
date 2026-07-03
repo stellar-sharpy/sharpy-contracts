@@ -93,15 +93,6 @@ pub struct InvoiceOptions {
 
 #[contracttype]
 #[derive(Clone, Debug)]
-pub struct CreateInvoiceParams {
-    pub recipients: Vec<Address>,
-    pub amounts: Vec<i128>,
-    pub tokens: Vec<Address>,
-    pub deadline: u64,
-}
-
-#[contracttype]
-#[derive(Clone, Debug)]
 pub struct Invoice {
     pub version: u32,
     pub creator: Address,
@@ -120,4 +111,23 @@ pub struct Invoice {
     pub split_rules: Vec<SplitRule>,
     pub auto_resolve_rules: Vec<ResolveRule>,
     pub arbitrator: Option<Address>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CreateInvoiceParams {
+    pub recipients: Vec<Address>,
+    pub amounts: Vec<i128>,
+    pub tokens: Vec<Address>,
+    pub deadline: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceStats {
+    pub funded: i128,
+    pub total: i128,
+    pub payment_count: u32,
+    pub unique_payers: u32,
+    pub completion_bps: u32,
 }

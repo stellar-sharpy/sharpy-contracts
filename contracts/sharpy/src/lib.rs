@@ -11,7 +11,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Map, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceOptions, InvoicePayment,
-    InvoiceStatus, Payment, SplitRule, SubscriptionParams,
+    InvoiceStats, InvoiceStatus, Payment, SplitRule, SubscriptionParams,
 };
 
 fn admin_key() -> Symbol { symbol_short!("admin") }
@@ -136,6 +136,16 @@ impl SharpyContract {
         assert!(deadline > env.ledger().timestamp(), "deadline must be in the future");
         for amt in amounts.iter() {
             assert!(amt > 0, "amounts must be positive");
+        }
+
+        // Validate percentage split rules do not exceed 10000 bps total
+        if !options.split_rules.is_empty() {
+            let total_bps: u32 = options.split_rules.iter().map(|r| match r {
+                SplitRule::Percentage(bps) => bps,
+                SplitRule::Tiered(_, bps) => bps,
+                SplitRule::Fixed(_) => 0,
+            }).sum();
+            assert!(total_bps <= 10_000u32, "split rules exceed 100% (10000 bps)");
         }
 
         let id = bump_counter(&env);
@@ -350,7 +360,7 @@ impl SharpyContract {
             invoice.completion_time = Some(env.ledger().timestamp());
             save_invoice(&env, invoice_id, &invoice);
             append_audit(&env, invoice_id, symbol_short!("resolve"), &resolver);
-            events::invoice_refunded(&env, invoice_id);
+            events::invoice_refunded(&env, invoice_id, invoice.funded, invoice.recipients.len(), &invoice.creator);
         }
 
         events::dispute_resolved(&env, invoice_id, &resolver, release);
@@ -496,6 +506,30 @@ impl SharpyContract {
 
     pub fn get_next_recurring(env: Env, invoice_id: u64) -> Option<u64> {
         env.storage().persistent().get(&next_invoice_key(invoice_id))
+    }
+
+    pub fn get_invoice_stats(env: Env, invoice_id: u64) -> InvoiceStats {
+        let invoice = load_invoice(&env, invoice_id);
+        let total: i128 = invoice.amounts.iter().sum();
+        let payment_count = invoice.payments.len();
+        let mut unique: Vec<Address> = Vec::new(&env);
+        for p in invoice.payments.iter() {
+            if !unique.contains(&p.payer) {
+                unique.push_back(p.payer.clone());
+            }
+        }
+        let completion_bps = if total > 0 {
+            (invoice.funded as u128 * 10_000u128 / total as u128) as u32
+        } else {
+            0
+        };
+        InvoiceStats {
+            funded: invoice.funded,
+            total,
+            payment_count,
+            unique_payers: unique.len(),
+            completion_bps,
+        }
     }
 
     pub fn get_escrow_state(env: Env, invoice_id: u64) -> Option<DisputeState> {
