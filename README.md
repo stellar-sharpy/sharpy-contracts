@@ -18,6 +18,25 @@ Soroban smart contract powering the Sharpy split payment protocol on Stellar.
 - [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CAYTIFPD6RFWVHMK5SPPUUIWWAAANHKOJB6GOAJS5SR5MBKZMEY2UODZ)
 - [Frontend dApp](https://sharpy-sigma.vercel.app)
 
+![Sharpy App Screenshot](https://sharpy-sigma.vercel.app/sharpy.png)
+
+## Architecture
+
+```mermaid
+graph TD
+    App["sharpy-app\nNext.js 14"]
+    SDK["@stellar-sharpy/sdk"]
+    RPC["Soroban RPC"]
+    Contract["Sharpy Contract\nSoroban · Protocol 27"]
+    Stellar["Stellar Network"]
+
+    App -->|"calls"| SDK
+    SDK -->|"simulate + submit"| RPC
+    RPC -->|"executes"| Contract
+    Contract -->|"ledger state"| Stellar
+    Stellar -->|"events"| SDK
+```
+
 ## Features
 
 - Multi-recipient invoice creation with configurable split rules
