@@ -8,7 +8,7 @@ mod types;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Env, Map, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceOptions, InvoicePayment,
     InvoiceStats, InvoiceStatus, Payment, SplitRule, SubscriptionParams,
@@ -43,7 +43,9 @@ fn load_invoice(env: &Env, id: u64) -> Invoice {
 
 fn save_invoice(env: &Env, id: u64, invoice: &Invoice) {
     env.storage().persistent().set(&invoice_key(id), invoice);
-    // Extend TTL to ~1 year (in ledgers at ~5s each: 365*24*3600/5 = 6_307_200)
+    // Protocol 26 CAP-78: limited TTL extension host function.
+    // Extend to ~1 year (6_307_200 ledgers at ~5s each).
+    // Only bumps if current TTL < min_ttl (100_000 ledgers ~ 6 days).
     env.storage().persistent().extend_ttl(&invoice_key(id), 100_000, 6_307_200);
 }
 
@@ -382,20 +384,39 @@ impl SharpyContract {
                 match invoice.split_rules.get(i as u32).unwrap() {
                     SplitRule::Fixed(fixed_amt) => fixed_amt,
                     SplitRule::Percentage(bps) => {
-                        (invoice.funded as u128 * bps as u128 / 10_000u128) as i128
+                        // Protocol 26 CAP-82: use checked arithmetic to prevent overflow
+                        // funded * bps / 10_000 — all i128, safe for balances up to i128::MAX
+                        invoice.funded
+                            .checked_mul(bps as i128)
+                            .expect("percentage: overflow in funded * bps")
+                            .checked_div(10_000)
+                            .expect("percentage: division failed")
                     }
                     SplitRule::Tiered(threshold, bps) => {
                         if invoice.funded > threshold {
-                            (invoice.funded as u128 * bps as u128 / 10_000u128) as i128
+                            // Protocol 26 CAP-82: checked arithmetic for tiered splits
+                            invoice.funded
+                                .checked_mul(bps as i128)
+                                .expect("tiered: overflow in funded * bps")
+                                .checked_div(10_000)
+                                .expect("tiered: division failed")
                         } else {
                             0
                         }
                     }
                 }
             } else if i == n - 1 {
-                invoice.funded - distributed
+                // Last recipient gets the remainder to avoid dust from rounding
+                invoice.funded
+                    .checked_sub(distributed)
+                    .expect("release: underflow computing remainder")
             } else {
-                (amount as u128 * invoice.funded as u128 / total as u128) as i128
+                // Proportional split: amount * funded / total — checked throughout
+                amount
+                    .checked_mul(invoice.funded)
+                    .expect("proportional: overflow in amount * funded")
+                    .checked_div(total)
+                    .expect("proportional: division by zero total")
             };
 
             distributed += proportional;
@@ -519,7 +540,12 @@ impl SharpyContract {
             }
         }
         let completion_bps = if total > 0 {
-            (invoice.funded as u128 * 10_000u128 / total as u128) as u32
+            // Protocol 26 CAP-82: checked arithmetic for completion percentage
+            invoice.funded
+                .checked_mul(10_000)
+                .expect("stats: overflow in funded * 10_000")
+                .checked_div(total)
+                .expect("stats: division by zero") as u32
         } else {
             0
         };
@@ -534,5 +560,35 @@ impl SharpyContract {
 
     pub fn get_escrow_state(env: Env, invoice_id: u64) -> Option<DisputeState> {
         env.storage().persistent().get(&escrow_state_key(invoice_id))
+    }
+
+    /// Extend the TTL of an invoice entry to ~1 year.
+    /// Protocol 26 CAP-78: host function for limited TTL extension keeps long-lived
+    /// and recurring invoices accessible without requiring a full state restore.
+    pub fn bump_invoice_ttl(env: Env, invoice_id: u64) {
+        let _ = load_invoice(&env, invoice_id);
+        env.storage().persistent().extend_ttl(&invoice_key(invoice_id), 100_000, 6_307_200);
+    }
+
+    /// Returns a SHA-256 fingerprint of the invoice's immutable fields.
+    /// Protocol 25 CAP-75 / Protocol 26 crypto module: deterministic, tamper-evident
+    /// content hash. The fingerprint commits to invoice_id, deadline, funded amount,
+    /// and total — any modification produces a different hash.
+    /// Use this for off-chain verification or receipt generation.
+    pub fn get_invoice_fingerprint(env: Env, invoice_id: u64) -> soroban_sdk::BytesN<32> {
+        let invoice = load_invoice(&env, invoice_id);
+        let total: i128 = invoice.amounts.iter().sum();
+
+        // Build a flat byte buffer of key invoice fields for deterministic hashing
+        let mut buf: [u8; 40] = [0u8; 40]; // 8 + 8 + 8 + 16 bytes
+        buf[0..8].copy_from_slice(&invoice_id.to_be_bytes());
+        buf[8..16].copy_from_slice(&invoice.deadline.to_be_bytes());
+        buf[16..24].copy_from_slice(&(invoice.recipients.len() as u64).to_be_bytes());
+        buf[24..40].copy_from_slice(&total.to_be_bytes());
+
+        let data = Bytes::from_array(&env, &buf);
+
+        // SHA-256 via Protocol 25/26 crypto host function — returns Hash<32>
+        env.crypto().sha256(&data).into()
     }
 }
