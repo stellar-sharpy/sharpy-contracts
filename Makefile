@@ -1,11 +1,11 @@
 .PHONY: build optimize test deploy-testnet deploy-mainnet
 
-WASM=target/wasm32-unknown-unknown/release/sharpy.wasm
-OPTIMIZED=target/wasm32-unknown-unknown/release/sharpy.optimized.wasm
+WASM=target/wasm32v1-none/release/sharpy.wasm
+OPTIMIZED=target/wasm32v1-none/release/sharpy.optimized.wasm
 TESTNET_ID=CAYTIFPD6RFWVHMK5SPPUUIWWAAANHKOJB6GOAJS5SR5MBKZMEY2UODZ
 
 build:
-	cargo build --release --target wasm32-unknown-unknown
+	cargo build --release --target wasm32v1-none
 
 optimize: build
 	stellar contract optimize --wasm $(WASM)
