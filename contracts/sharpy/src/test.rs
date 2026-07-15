@@ -518,4 +518,77 @@ mod tests {
 
         client.release_escrow(&id);
     }
+
+    // ---------------------------------------------------------
+    // Protocol 26 CAP-78: bump_invoice_ttl
+    // Protocol 25/26 crypto: get_invoice_fingerprint
+    // Protocol 26 CAP-82: checked arithmetic in stats
+    // ---------------------------------------------------------
+
+    #[test]
+    fn test_bump_invoice_ttl_succeeds() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [500i128]),
+            &Vec::from_array(&env, [token]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        // Should succeed without panic — CAP-78 TTL extension
+        client.bump_invoice_ttl(&id);
+    }
+
+    #[test]
+    fn test_invoice_fingerprint_is_deterministic() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [500i128]),
+            &Vec::from_array(&env, [token]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        // Same invoice should produce same fingerprint on repeated calls
+        let fp1 = client.get_invoice_fingerprint(&id);
+        let fp2 = client.get_invoice_fingerprint(&id);
+        assert_eq!(fp1, fp2, "fingerprint must be deterministic");
+    }
+
+    #[test]
+    fn test_invoice_stats_checked_arithmetic() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [1000i128]),
+            &Vec::from_array(&env, [token]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        let stats = client.get_invoice_stats(&id);
+        assert_eq!(stats.total, 1000i128);
+        assert_eq!(stats.funded, 0i128);
+        assert_eq!(stats.completion_bps, 0u32);
+    }
 }
