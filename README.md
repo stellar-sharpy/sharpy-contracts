@@ -4,7 +4,7 @@
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
 ![Tests](https://img.shields.io/badge/tests-24%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.1.0-6C63FF)
+![Version](https://img.shields.io/badge/version-0.2.0-6C63FF)
 
 Soroban smart contract powering the Sharpy split payment protocol on Stellar. Handles invoice creation, multi-recipient fund distribution, escrow management, recurring billing, and agentic payment integration.
 
