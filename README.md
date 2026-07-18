@@ -17,13 +17,12 @@ Soroban smart contract powering the Sharpy split payment protocol on Stellar. Ha
 
 | Network | Contract ID | Status |
 |---------|-------------|--------|
-| Testnet | `CAYTIFPD6RFWVHMK5SPPUUIWWAAANHKOJB6GOAJS5SR5MBKZMEY2UODZ` | ✅ Live |
+| Testnet | `CBJ7WNBHCO5LKM7LW33D7HUT7WZI5OROVPC7IJL3A6NT6HMVJ4XUWPHJ` | ✅ Live |
 | Mainnet | Coming soon | ⏳ Pending |
 
-- [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CAYTIFPD6RFWVHMK5SPPUUIWWAAANHKOJB6GOAJS5SR5MBKZMEY2UODZ)
+- [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CBJ7WNBHCO5LKM7LW33D7HUT7WZI5OROVPC7IJL3A6NT6HMVJ4XUWPHJ)
 - [Frontend dApp](https://sharpy-sigma.vercel.app)
 - [Pitch Deck](https://gamma.app/docs/Split-Payments-on-Stellar-s0et8z1agtva59n)
-- [Demo Script](https://app.notion.com/p/39ea94bd556e800d8cbff3aa4cfc9ea6)
 
 ---
 
