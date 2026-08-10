@@ -24,6 +24,9 @@ fn escrow_state_key(id: u64) -> (Symbol, u64) { (symbol_short!("escrow"), id) }
 fn recurring_params_key(id: u64) -> (Symbol, u64) { (symbol_short!("rec"), id) }
 fn next_invoice_key(id: u64) -> (Symbol, u64) { (symbol_short!("next_inv"), id) }
 fn creator_index_key(creator: &Address) -> (Symbol, Address) { (symbol_short!("by_ctr"), creator.clone()) }
+fn account_balance_key(account: &Address, token: &Address) -> (Symbol, Address, Address) {
+    (symbol_short!("acc_bal"), account.clone(), token.clone())
+}
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
@@ -68,6 +71,18 @@ fn index_invoice_for_creator(env: &Env, creator: &Address, invoice_id: u64) {
     let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
     ids.push_back(invoice_id);
     env.storage().persistent().set(&key, &ids);
+    env.storage().persistent().extend_ttl(&key, 100_000, 6_307_200);
+}
+
+/// Credits an internal balance for an account+token pair when a direct transfer fails.
+/// Used in _release when a recipient cannot receive funds (no trustline, frozen account, etc.)
+/// The credited amount can be withdrawn later via claim().
+fn credit_account(env: &Env, account: &Address, token: &Address, amount: i128) {
+    let key = account_balance_key(account, token);
+    let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+    // Use checked_add to prevent overflow if multiple failed transfers accumulate
+    let new_balance = current.checked_add(amount).expect("account balance overflow");
+    env.storage().persistent().set(&key, &new_balance);
     env.storage().persistent().extend_ttl(&key, 100_000, 6_307_200);
 }
 
@@ -390,7 +405,8 @@ impl SharpyContract {
         for i in 0..n {
             let recipient = invoice.recipients.get(i).unwrap();
             let amount = invoice.amounts.get(i).unwrap();
-            let token_client = token::Client::new(env, &invoice.tokens.get(i).expect("no token"));
+            let token = invoice.tokens.get(i).expect("no token");
+            let token_client = token::Client::new(env, &token);
 
             let proportional = if !invoice.split_rules.is_empty() {
                 match invoice.split_rules.get(i as u32).unwrap() {
@@ -433,7 +449,17 @@ impl SharpyContract {
 
             distributed += proportional;
             if proportional > 0 {
-                token_client.transfer(&env.current_contract_address(), &recipient, &proportional);
+                // Use try_transfer to catch failures (no trustline, frozen account, etc.)
+                // On any failure, credit an internal balance that can be claimed later
+                match token_client.try_transfer(&env.current_contract_address(), &recipient, &proportional) {
+                    Ok(Ok(())) => {
+                        // Transfer succeeded — no action needed
+                    }
+                    _ => {
+                        // Transfer failed — credit internal balance for later claim
+                        credit_account(env, &recipient, &token, proportional);
+                    }
+                }
             }
         }
 
@@ -647,6 +673,44 @@ impl SharpyContract {
             .persistent()
             .get(&creator_index_key(&creator))
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Returns the claimable balance for a given account and token.
+    /// Balances accumulate when recipient transfers fail during invoice release.
+    /// Returns 0 if no balance exists.
+    pub fn get_claimable_balance(env: Env, account: Address, token: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&account_balance_key(&account, &token))
+            .unwrap_or(0)
+    }
+
+    /// Withdraws a credited balance for an account and token.
+    /// Permissionless — anyone can trigger the claim for any account.
+    /// The transfer goes from the contract vault to the account.
+    /// 
+    /// # Panics
+    /// - If the claimable balance is zero
+    /// - If the token transfer fails (e.g., account still has no trustline)
+    /// 
+    /// # Security
+    /// - CEI pattern: storage is deleted before the transfer (defense-in-depth)
+    /// - Checked arithmetic prevents overflow (balance accumulation uses checked_add)
+    /// - Composite key (account, token) prevents collision
+    pub fn claim(env: Env, account: Address, token: Address) -> i128 {
+        require_not_paused(&env);
+        let key = account_balance_key(&account, &token);
+        let balance: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        assert!(balance > 0, "no claimable balance");
+
+        // CEI pattern: delete storage BEFORE transfer (even though Soroban has no reentrancy)
+        env.storage().persistent().remove(&key);
+
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&env.current_contract_address(), &account, &balance);
+
+        events::account_balance_claimed(&env, &account, &token, balance);
+        balance
     }
 
     /// Returns a SHA-256 fingerprint of the invoice's immutable fields.

@@ -83,3 +83,15 @@ pub fn dispute_raised(env: &Env, invoice_id: u64, creator: &Address) {
 pub fn dispute_resolved(env: &Env, invoice_id: u64, resolver: &Address, release: bool) {
     env.events().publish((symbol_short!("dsprslv"),), DisputeResolvedEvent { invoice_id, resolver: resolver.clone(), release });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct AccountBalanceClaimedEvent {
+    pub account: Address,
+    pub token: Address,
+    pub amount: i128,
+}
+
+pub fn account_balance_claimed(env: &Env, account: &Address, token: &Address, amount: i128) {
+    env.events().publish((symbol_short!("claimed"),), AccountBalanceClaimedEvent { account: account.clone(), token: token.clone(), amount });
+}
