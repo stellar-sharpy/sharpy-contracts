@@ -835,4 +835,150 @@ mod tests {
         assert_eq!(ids.len(), 1);
         assert_eq!(ids.get(0).unwrap(), id);
     }
+
+    // -----------------------------------------------------------------------
+    // Fallback balance recovery tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_claimable_balance_returns_zero_initially() {
+        let (env, client) = setup();
+        let account = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        let balance = client.get_claimable_balance(&account, &token);
+        assert_eq!(balance, 0i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "no claimable balance")]
+    fn test_claim_with_zero_balance_fails() {
+        let (env, client) = setup();
+        let account = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        // Attempting to claim with no balance should panic
+        client.claim(&account, &token);
+    }
+
+    #[test]
+    fn test_claim_withdraws_credited_balance() {
+        let (env, client) = setup();
+        let account = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &token);
+
+        // Mint tokens to the contract (simulating failed transfer funds held in vault)
+        let contract_addr = client.address.clone();
+        sac.mint(&contract_addr, &1000i128);
+
+        // Manually credit a balance (simulating what would happen on failed transfer)
+        // We do this by directly manipulating storage since credit_account is private
+        use soroban_sdk::symbol_short;
+        let key = (symbol_short!("acc_bal"), account.clone(), token.clone());
+        env.as_contract(&contract_addr, || {
+            env.storage().persistent().set(&key, &500i128);
+            env.storage().persistent().extend_ttl(&key, 100_000, 6_307_200);
+        });
+
+        // Verify balance is queryable
+        let balance_before = client.get_claimable_balance(&account, &token);
+        assert_eq!(balance_before, 500i128);
+
+        // Claim should transfer the balance
+        let claimed = client.claim(&account, &token);
+        assert_eq!(claimed, 500i128);
+
+        // Balance should now be zero
+        let balance_after = client.get_claimable_balance(&account, &token);
+        assert_eq!(balance_after, 0i128);
+
+        // Account should have received the tokens
+        assert_eq!(sac.balance(&account), 500i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "no claimable balance")]
+    fn test_claim_twice_fails() {
+        let (env, client) = setup();
+        let account = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &token);
+
+        let contract_addr = client.address.clone();
+        sac.mint(&contract_addr, &1000i128);
+
+        // Credit balance
+        use soroban_sdk::symbol_short;
+        let key = (symbol_short!("acc_bal"), account.clone(), token.clone());
+        env.as_contract(&contract_addr, || {
+            env.storage().persistent().set(&key, &500i128);
+            env.storage().persistent().extend_ttl(&key, 100_000, 6_307_200);
+        });
+
+        // First claim succeeds
+        client.claim(&account, &token);
+
+        // Second claim should panic
+        client.claim(&account, &token);
+    }
+
+    #[test]
+    fn test_claimable_balance_accumulation() {
+        let (env, client) = setup();
+        let account = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &token);
+
+        let contract_addr = client.address.clone();
+        sac.mint(&contract_addr, &2000i128);
+
+        // Simulate multiple failed transfers crediting the same account
+        use soroban_sdk::symbol_short;
+        let key = (symbol_short!("acc_bal"), account.clone(), token.clone());
+        env.as_contract(&contract_addr, || {
+            // First failure
+            let current1: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            env.storage().persistent().set(&key, &(current1 + 300i128));
+            // Second failure
+            let current2: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+            env.storage().persistent().set(&key, &(current2 + 700i128));
+        });
+
+        // Balance should be sum of all failures
+        let balance = client.get_claimable_balance(&account, &token);
+        assert_eq!(balance, 1000i128);
+
+        // Claim should withdraw the full accumulated amount
+        let claimed = client.claim(&account, &token);
+        assert_eq!(claimed, 1000i128);
+        assert_eq!(sac.balance(&account), 1000i128);
+    }
+
+    #[test]
+    fn test_claimable_balance_isolated_per_token() {
+        let (env, client) = setup();
+        let account = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let token_a = env.register_stellar_asset_contract(admin.clone());
+        let token_b = env.register_stellar_asset_contract(admin.clone());
+
+        let contract_addr = client.address.clone();
+
+        // Credit balances for two different tokens
+        use soroban_sdk::symbol_short;
+        let key_a = (symbol_short!("acc_bal"), account.clone(), token_a.clone());
+        let key_b = (symbol_short!("acc_bal"), account.clone(), token_b.clone());
+        env.as_contract(&contract_addr, || {
+            env.storage().persistent().set(&key_a, &500i128);
+            env.storage().persistent().set(&key_b, &300i128);
+        });
+
+        // Balances should be independent
+        assert_eq!(client.get_claimable_balance(&account, &token_a), 500i128);
+        assert_eq!(client.get_claimable_balance(&account, &token_b), 300i128);
+    }
 }
