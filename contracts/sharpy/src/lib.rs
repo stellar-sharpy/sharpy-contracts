@@ -23,6 +23,7 @@ fn audit_log_key(id: u64) -> (Symbol, u64) { (symbol_short!("log"), id) }
 fn escrow_state_key(id: u64) -> (Symbol, u64) { (symbol_short!("escrow"), id) }
 fn recurring_params_key(id: u64) -> (Symbol, u64) { (symbol_short!("rec"), id) }
 fn next_invoice_key(id: u64) -> (Symbol, u64) { (symbol_short!("next_inv"), id) }
+fn creator_index_key(creator: &Address) -> (Symbol, Address) { (symbol_short!("by_ctr"), creator.clone()) }
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
@@ -60,6 +61,14 @@ fn bump_counter(env: &Env) -> u64 {
     let id: u64 = env.storage().persistent().get(&counter_key()).unwrap_or(0u64) + 1;
     env.storage().persistent().set(&counter_key(), &id);
     id
+}
+
+fn index_invoice_for_creator(env: &Env, creator: &Address, invoice_id: u64) {
+    let key = creator_index_key(creator);
+    let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
+    ids.push_back(invoice_id);
+    env.storage().persistent().set(&key, &ids);
+    env.storage().persistent().extend_ttl(&key, 100_000, 6_307_200);
 }
 
 fn build_invoice(
@@ -157,6 +166,7 @@ impl SharpyContract {
             options.arbitrator,
         );
         save_invoice(&env, id, &invoice);
+        index_invoice_for_creator(&env, &creator, id);
         events::invoice_created(&env, id, &creator);
         id
     }
@@ -175,6 +185,7 @@ impl SharpyContract {
                 params.tokens.clone(), params.deadline, false, 0, Vec::new(&env), None,
             );
             save_invoice(&env, id, &invoice);
+            index_invoice_for_creator(&env, &creator, id);
             events::invoice_created(&env, id, &creator);
             ids.push_back(id);
         }
@@ -203,6 +214,7 @@ impl SharpyContract {
             tokens.clone(), deadline, false, 0, Vec::new(&env), None,
         );
         save_invoice(&env, id, &invoice);
+        index_invoice_for_creator(&env, &creator, id);
 
         let params = SubscriptionParams {
             creator: creator.clone(),
@@ -568,6 +580,73 @@ impl SharpyContract {
     pub fn bump_invoice_ttl(env: Env, invoice_id: u64) {
         let _ = load_invoice(&env, invoice_id);
         env.storage().persistent().extend_ttl(&invoice_key(invoice_id), 100_000, 6_307_200);
+    }
+
+    /// Returns the exact per-recipient payout amounts for a given payment amount,
+    /// using the same proportional and dust logic as `_release`.
+    /// Pure read — no state is modified.
+    /// Useful for showing payers a precise breakdown before they sign.
+    pub fn preview_payout(env: Env, invoice_id: u64, amount: i128) -> Vec<i128> {
+        assert!(amount > 0, "amount must be positive");
+        let invoice = load_invoice(&env, invoice_id);
+        let total: i128 = invoice.amounts.iter().sum();
+        let n = invoice.recipients.len();
+        let mut result: Vec<i128> = Vec::new(&env);
+        let mut distributed: i128 = 0;
+
+        for i in 0..n {
+            let recipient_amount = invoice.amounts.get(i).unwrap();
+            let payout = if !invoice.split_rules.is_empty() {
+                match invoice.split_rules.get(i as u32).unwrap() {
+                    SplitRule::Fixed(fixed_amt) => fixed_amt,
+                    SplitRule::Percentage(bps) => {
+                        amount
+                            .checked_mul(bps as i128)
+                            .expect("preview: overflow in amount * bps")
+                            .checked_div(10_000)
+                            .expect("preview: division failed")
+                    }
+                    SplitRule::Tiered(threshold, bps) => {
+                        if amount > threshold {
+                            amount
+                                .checked_mul(bps as i128)
+                                .expect("preview: overflow in amount * bps")
+                                .checked_div(10_000)
+                                .expect("preview: division failed")
+                        } else {
+                            0
+                        }
+                    }
+                }
+            } else if i == n - 1 {
+                // Last recipient gets the dust remainder — identical to _release
+                amount
+                    .checked_sub(distributed)
+                    .expect("preview: underflow computing remainder")
+            } else {
+                // Proportional: recipient_amount * payment_amount / total
+                recipient_amount
+                    .checked_mul(amount)
+                    .expect("preview: overflow in amount * funded")
+                    .checked_div(total)
+                    .expect("preview: division by zero total")
+            };
+
+            distributed += payout;
+            result.push_back(payout);
+        }
+
+        result
+    }
+
+    /// Returns all invoice IDs created by a given address.
+    /// Updated on every create_invoice, create_batch, and create_recurring call.
+    /// Use this for dashboard pagination instead of scanning sequential IDs.
+    pub fn get_invoices_by_creator(env: Env, creator: Address) -> Vec<u64> {
+        env.storage()
+            .persistent()
+            .get(&creator_index_key(&creator))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     /// Returns a SHA-256 fingerprint of the invoice's immutable fields.

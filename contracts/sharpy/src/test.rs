@@ -591,4 +591,248 @@ mod tests {
         assert_eq!(stats.funded, 0i128);
         assert_eq!(stats.completion_bps, 0u32);
     }
+
+    // -----------------------------------------------------------------------
+    // preview_payout tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_preview_payout_proportional_two_recipients() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let t1 = Address::generate(&env);
+        let t2 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        // 60/40 split: amounts [600, 400] out of total 1000
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [r1, r2]),
+            &Vec::from_array(&env, [600i128, 400i128]),
+            &Vec::from_array(&env, [t1, t2]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        // Preview paying 1000 — should get [600, 400]
+        let preview = client.preview_payout(&id, &1000i128);
+        assert_eq!(preview.len(), 2);
+        assert_eq!(preview.get(0).unwrap(), 600i128);
+        assert_eq!(preview.get(1).unwrap(), 400i128);
+    }
+
+    #[test]
+    fn test_preview_payout_dust_goes_to_last_recipient() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let t1 = Address::generate(&env);
+        let t2 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        // Equal split but odd amount — dust should go to last recipient
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [r1, r2]),
+            &Vec::from_array(&env, [500i128, 500i128]),
+            &Vec::from_array(&env, [t1, t2]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        // Preview paying 101 — 50 + 51 (dust to last)
+        let preview = client.preview_payout(&id, &101i128);
+        assert_eq!(preview.len(), 2);
+        let sum: i128 = preview.iter().sum();
+        assert_eq!(sum, 101i128, "amounts must sum to payment amount");
+    }
+
+    #[test]
+    fn test_preview_payout_single_recipient() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [1000i128]),
+            &Vec::from_array(&env, [token]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        let preview = client.preview_payout(&id, &500i128);
+        assert_eq!(preview.len(), 1);
+        assert_eq!(preview.get(0).unwrap(), 500i128);
+    }
+
+    #[test]
+    fn test_preview_payout_percentage_split_rules() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let t1 = Address::generate(&env);
+        let t2 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let options = InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::from_array(&env, [
+                SplitRule::Percentage(7000u32), // 70%
+                SplitRule::Percentage(3000u32), // 30%
+            ]),
+            auto_resolve_rules: Vec::new(&env),
+            arbitrator: None,
+        };
+
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [r1, r2]),
+            &Vec::from_array(&env, [700i128, 300i128]),
+            &Vec::from_array(&env, [t1, t2]),
+            &deadline,
+            &options,
+        );
+
+        let preview = client.preview_payout(&id, &1000i128);
+        assert_eq!(preview.get(0).unwrap(), 700i128); // 70% of 1000
+        assert_eq!(preview.get(1).unwrap(), 300i128); // 30% of 1000
+    }
+
+    // -----------------------------------------------------------------------
+    // get_invoices_by_creator tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_get_invoices_by_creator_empty_before_create() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+
+        let ids = client.get_invoices_by_creator(&creator);
+        assert_eq!(ids.len(), 0);
+    }
+
+    #[test]
+    fn test_get_invoices_by_creator_single_invoice() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [1000i128]),
+            &Vec::from_array(&env, [token]),
+            &deadline,
+            &default_options(&env),
+        );
+
+        let ids = client.get_invoices_by_creator(&creator);
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids.get(0).unwrap(), id);
+    }
+
+    #[test]
+    fn test_get_invoices_by_creator_multiple_invoices() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id1 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token.clone()]),
+            &deadline, &default_options(&env));
+        let id2 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [200i128]), &Vec::from_array(&env, [token.clone()]),
+            &deadline, &default_options(&env));
+        let id3 = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [300i128]), &Vec::from_array(&env, [token]),
+            &deadline, &default_options(&env));
+
+        let ids = client.get_invoices_by_creator(&creator);
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids.get(0).unwrap(), id1);
+        assert_eq!(ids.get(1).unwrap(), id2);
+        assert_eq!(ids.get(2).unwrap(), id3);
+    }
+
+    #[test]
+    fn test_get_invoices_by_creator_isolated_per_creator() {
+        let (env, client) = setup();
+        let creator_a = Address::generate(&env);
+        let creator_b = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        client.create_invoice(&creator_a, &Vec::from_array(&env, [recipient.clone()]),
+            &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token.clone()]),
+            &deadline, &default_options(&env));
+        client.create_invoice(&creator_b, &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [200i128]), &Vec::from_array(&env, [token]),
+            &deadline, &default_options(&env));
+
+        let ids_a = client.get_invoices_by_creator(&creator_a);
+        let ids_b = client.get_invoices_by_creator(&creator_b);
+        assert_eq!(ids_a.len(), 1);
+        assert_eq!(ids_b.len(), 1);
+        // They should hold different invoice IDs
+        assert_ne!(ids_a.get(0).unwrap(), ids_b.get(0).unwrap());
+    }
+
+    #[test]
+    fn test_get_invoices_by_creator_includes_batch() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let params = CreateInvoiceParams {
+            recipients: Vec::from_array(&env, [recipient]),
+            amounts: Vec::from_array(&env, [100i128]),
+            tokens: Vec::from_array(&env, [token]),
+            deadline,
+        };
+        let batch_ids = client.create_batch(&creator, &Vec::from_array(&env, [params.clone(), params]));
+        let index_ids = client.get_invoices_by_creator(&creator);
+
+        assert_eq!(index_ids.len(), 2);
+        assert_eq!(index_ids.get(0).unwrap(), batch_ids.get(0).unwrap());
+        assert_eq!(index_ids.get(1).unwrap(), batch_ids.get(1).unwrap());
+    }
+
+    #[test]
+    fn test_get_invoices_by_creator_includes_recurring() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_recurring(
+            &creator,
+            &Vec::from_array(&env, [recipient]),
+            &Vec::from_array(&env, [500i128]),
+            &Vec::from_array(&env, [token]),
+            &deadline,
+            &(86400u64 * 30),
+            &3u32,
+        );
+
+        let ids = client.get_invoices_by_creator(&creator);
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids.get(0).unwrap(), id);
+    }
 }
