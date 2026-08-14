@@ -2,7 +2,7 @@
 
 ![Soroban](https://img.shields.io/badge/Soroban-Protocol%2027-6C63FF?logo=stellar)
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
-![Tests](https://img.shields.io/badge/tests-24%20passing-00D4AA)
+![Tests](https://img.shields.io/badge/tests-43%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-0.2.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
@@ -111,6 +111,8 @@ graph TD
 | `get_next_recurring(id)` | Next invoice ID in a recurring chain |
 | `get_escrow_state(id)` | Current escrow/dispute state |
 | `bump_invoice_ttl(id)` | Extend invoice storage TTL to prevent archival (Protocol 26 CAP-78) |
+| `get_invoice_count()` | Total number of invoices ever created — O(1) global stat |
+| `get_invoices_by_payer(payer)` | All invoice IDs paid by a given address (payer index) |
 | `pause` / `unpause` | Admin circuit breaker |
 
 ---

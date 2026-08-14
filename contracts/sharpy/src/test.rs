@@ -981,4 +981,111 @@ mod tests {
         assert_eq!(client.get_claimable_balance(&account, &token_a), 500i128);
         assert_eq!(client.get_claimable_balance(&account, &token_b), 300i128);
     }
+
+    #[test]
+    fn test_get_invoice_count_increments() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        assert_eq!(client.get_invoice_count(), 0u64);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let options = default_options(&env);
+
+        client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &options,
+        );
+        assert_eq!(client.get_invoice_count(), 1u64);
+
+        client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 500i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &options,
+        );
+        assert_eq!(client.get_invoice_count(), 2u64);
+    }
+
+    #[test]
+    fn test_get_invoices_by_payer() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        let sac = token::StellarAssetClient::new(&env, &token);
+        sac.mint(&payer, &5000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let options = default_options(&env);
+
+        let id1 = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &options,
+        );
+        let id2 = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 500i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &options,
+        );
+
+        client.pay(&payer, &id1, &1000i128);
+        client.pay(&payer, &id2, &500i128);
+
+        let paid = client.get_invoices_by_payer(&payer);
+        assert_eq!(paid.len(), 2);
+        assert!(paid.contains(&id1));
+        assert!(paid.contains(&id2));
+    }
+
+    #[test]
+    fn test_get_invoices_by_payer_deduplicates() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        let sac = token::StellarAssetClient::new(&env, &token);
+        sac.mint(&payer, &5000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let options = default_options(&env);
+
+        let id1 = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 2000i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &options,
+        );
+
+        // Pay same invoice twice — payer index should deduplicate
+        client.pay(&payer, &id1, &1000i128);
+        client.pay(&payer, &id1, &1000i128);
+
+        let paid = client.get_invoices_by_payer(&payer);
+        assert_eq!(paid.len(), 1, "same invoice paid twice should only appear once in payer index");
+    }
 }

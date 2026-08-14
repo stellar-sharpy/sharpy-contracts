@@ -24,6 +24,7 @@ fn escrow_state_key(id: u64) -> (Symbol, u64) { (symbol_short!("escrow"), id) }
 fn recurring_params_key(id: u64) -> (Symbol, u64) { (symbol_short!("rec"), id) }
 fn next_invoice_key(id: u64) -> (Symbol, u64) { (symbol_short!("next_inv"), id) }
 fn creator_index_key(creator: &Address) -> (Symbol, Address) { (symbol_short!("by_ctr"), creator.clone()) }
+fn payer_index_key(payer: &Address) -> (Symbol, Address) { (symbol_short!("by_pyr"), payer.clone()) }
 fn account_balance_key(account: &Address, token: &Address) -> (Symbol, Address, Address) {
     (symbol_short!("acc_bal"), account.clone(), token.clone())
 }
@@ -72,6 +73,17 @@ fn index_invoice_for_creator(env: &Env, creator: &Address, invoice_id: u64) {
     ids.push_back(invoice_id);
     env.storage().persistent().set(&key, &ids);
     env.storage().persistent().extend_ttl(&key, 100_000, 6_307_200);
+}
+
+fn index_invoice_for_payer(env: &Env, payer: &Address, invoice_id: u64) {
+    let key = payer_index_key(payer);
+    let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
+    // Only index if not already present (payer may pay same invoice multiple times)
+    if !ids.contains(&invoice_id) {
+        ids.push_back(invoice_id);
+        env.storage().persistent().set(&key, &ids);
+        env.storage().persistent().extend_ttl(&key, 100_000, 6_307_200);
+    }
 }
 
 /// Credits an internal balance for an account+token pair when a direct transfer fails.
@@ -262,6 +274,7 @@ impl SharpyContract {
 
         invoice.payments.push_back(Payment { payer: payer.clone(), amount, tip: 0 });
         invoice.funded += amount;
+        index_invoice_for_payer(&env, &payer, invoice_id);
         append_audit(&env, invoice_id, symbol_short!("pay"), &payer);
         events::payment_received(&env, invoice_id, &payer, amount);
 
@@ -733,5 +746,22 @@ impl SharpyContract {
 
         // SHA-256 via Protocol 25/26 crypto host function — returns Hash<32>
         env.crypto().sha256(&data).into()
+    }
+
+    /// Returns the total number of invoices ever created.
+    /// Reads the global counter directly — O(1), no iteration.
+    /// Useful for dashboards, analytics, and protocol stats.
+    pub fn get_invoice_count(env: Env) -> u64 {
+        env.storage().persistent().get(&counter_key()).unwrap_or(0u64)
+    }
+
+    /// Returns all invoice IDs that a given address has paid toward.
+    /// Indexed on every pay() call — O(1) write, O(n) read where n = unique invoices paid.
+    /// Deduplicates: paying the same invoice multiple times only adds one entry.
+    pub fn get_invoices_by_payer(env: Env, payer: Address) -> Vec<u64> {
+        env.storage()
+            .persistent()
+            .get(&payer_index_key(&payer))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 }
