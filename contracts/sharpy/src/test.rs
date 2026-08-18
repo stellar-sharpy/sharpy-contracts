@@ -1203,3 +1203,131 @@ mod test_get_invoices_by_creator {
         assert_eq!(client.get_invoices_by_creator(&creator_b).len(), 1);
     }
 }
+
+#[cfg(test)]
+mod test_preview_payout {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{
+        types::{InvoiceOptions, SplitRule},
+        SharpyContractClient,
+    };
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    fn opts_with_rules(env: &Env, rules: soroban_sdk::Vec<SplitRule>) -> InvoiceOptions {
+        InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: rules,
+            auto_resolve_rules: soroban_sdk::vec![env],
+            arbitrator: None,
+        }
+    }
+
+    fn no_rules(env: &Env) -> InvoiceOptions {
+        opts_with_rules(env, soroban_sdk::vec![env])
+    }
+
+    #[test]
+    fn test_preview_payout_proportional_two_recipients() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, r1.clone(), r2.clone()],
+            &soroban_sdk::vec![&env, 6000i128, 4000i128], // 60/40 split
+            &soroban_sdk::vec![&env, token.clone(), token.clone()],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        let payouts = client.preview_payout(&id, &10_000i128);
+        assert_eq!(payouts.len(), 2);
+        assert_eq!(payouts.get(0).unwrap(), 6000i128);
+        assert_eq!(payouts.get(1).unwrap(), 4000i128);
+    }
+
+    #[test]
+    fn test_preview_payout_percentage_split_rule() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        let rules = soroban_sdk::vec![&env, SplitRule::Percentage(7000u32), SplitRule::Percentage(3000u32)];
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, r1.clone(), r2.clone()],
+            &soroban_sdk::vec![&env, 7000i128, 3000i128],
+            &soroban_sdk::vec![&env, token.clone(), token.clone()],
+            &deadline,
+            &opts_with_rules(&env, rules),
+        );
+
+        let payouts = client.preview_payout(&id, &10_000i128);
+        assert_eq!(payouts.get(0).unwrap(), 7000i128); // 70% of 10_000
+        assert_eq!(payouts.get(1).unwrap(), 3000i128); // 30% of 10_000
+    }
+
+    #[test]
+    fn test_preview_payout_fixed_split_rule() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        let rules = soroban_sdk::vec![&env, SplitRule::Fixed(500i128)];
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, r1.clone()],
+            &soroban_sdk::vec![&env, 500i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &opts_with_rules(&env, rules),
+        );
+
+        let payouts = client.preview_payout(&id, &1000i128);
+        assert_eq!(payouts.get(0).unwrap(), 500i128); // Always fixed 500
+    }
+
+    #[test]
+    fn test_preview_payout_last_recipient_gets_dust() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, r1.clone(), r2.clone()],
+            &soroban_sdk::vec![&env, 1i128, 1i128], // equal split of odd amount
+            &soroban_sdk::vec![&env, token.clone(), token.clone()],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        let payouts = client.preview_payout(&id, &3i128); // 3 stroop — last gets remainder
+        let sum: i128 = payouts.iter().sum();
+        assert_eq!(sum, 3i128, "all funds must be distributed — no dust left behind");
+    }
+}
