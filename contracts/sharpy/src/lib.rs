@@ -770,3 +770,5 @@ impl SharpyContract {
 fn validate_token_address(env: &Env, token: &Address) {
     assert!(token != &Address::from_string(&env.string().from_str("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")), "invalid token address");
 }
+
+// Feature: add invoice tagging system - PR #4
