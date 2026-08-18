@@ -322,6 +322,7 @@ impl SharpyContract {
             let mut inv = load_invoice(&env, p.invoice_id);
             inv.payments.push_back(Payment { payer: payer.clone(), amount: p.amount, tip: 0 });
             inv.funded += p.amount;
+            index_invoice_for_payer(&env, &payer, p.invoice_id);
             append_audit(&env, p.invoice_id, symbol_short!("pool_pay"), &payer);
             events::payment_received(&env, p.invoice_id, &payer, p.amount);
             let inv_total: i128 = inv.amounts.iter().sum();
