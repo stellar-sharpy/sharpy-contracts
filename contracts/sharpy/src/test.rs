@@ -1542,3 +1542,92 @@ mod test_pause_circuit_breaker {
         client.pay(&payer, &id, &1000i128); // Should panic
     }
 }
+
+#[cfg(test)]
+mod test_batch_creator_index {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::CreateInvoiceParams, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    #[test]
+    fn test_batch_invoices_indexed_for_creator() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let batch = soroban_sdk::vec![
+            &env,
+            CreateInvoiceParams {
+                recipients: soroban_sdk::vec![&env, recipient.clone()],
+                amounts: soroban_sdk::vec![&env, 1000i128],
+                tokens: soroban_sdk::vec![&env, token.clone()],
+                deadline,
+            },
+            CreateInvoiceParams {
+                recipients: soroban_sdk::vec![&env, recipient.clone()],
+                amounts: soroban_sdk::vec![&env, 2000i128],
+                tokens: soroban_sdk::vec![&env, token.clone()],
+                deadline,
+            },
+            CreateInvoiceParams {
+                recipients: soroban_sdk::vec![&env, recipient.clone()],
+                amounts: soroban_sdk::vec![&env, 3000i128],
+                tokens: soroban_sdk::vec![&env, token.clone()],
+                deadline,
+            },
+        ];
+
+        let ids = client.create_batch(&creator, &batch);
+        assert_eq!(ids.len(), 3, "batch should return 3 IDs");
+
+        let by_creator = client.get_invoices_by_creator(&creator);
+        assert_eq!(by_creator.len(), 3, "all 3 batch invoices should appear in creator index");
+
+        for id in ids.iter() {
+            assert!(by_creator.contains(&id), "batch invoice ID {} not found in creator index", id);
+        }
+    }
+
+    #[test]
+    fn test_batch_invoice_count_increments_correctly() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        assert_eq!(client.get_invoice_count(), 0u64);
+
+        let batch = soroban_sdk::vec![
+            &env,
+            CreateInvoiceParams {
+                recipients: soroban_sdk::vec![&env, recipient.clone()],
+                amounts: soroban_sdk::vec![&env, 500i128],
+                tokens: soroban_sdk::vec![&env, token.clone()],
+                deadline,
+            },
+            CreateInvoiceParams {
+                recipients: soroban_sdk::vec![&env, recipient.clone()],
+                amounts: soroban_sdk::vec![&env, 500i128],
+                tokens: soroban_sdk::vec![&env, token.clone()],
+                deadline,
+            },
+        ];
+
+        client.create_batch(&creator, &batch);
+        assert_eq!(client.get_invoice_count(), 2u64, "invoice counter should reflect all batch items");
+    }
+}
