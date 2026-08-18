@@ -804,3 +804,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add payment amount limits - PR #19
 
 // Feature: add concurrent payment tests - PR #20
+
+// Feature: add attachment hash storage - PR #21
