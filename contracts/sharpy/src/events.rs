@@ -110,3 +110,19 @@ pub fn invoice_cancelled(env: &Env, invoice_id: u64, creator: &Address, refunded
         InvoiceCancelledEvent { invoice_id, creator: creator.clone(), refunded_amount },
     );
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct EscrowFundedEvent {
+    pub invoice_id: u64,
+    pub release_at: u64,
+    pub funded: i128,
+}
+
+/// Fired when an invoice is fully funded and funds are held in escrow pending release.
+pub fn escrow_funded(env: &Env, invoice_id: u64, release_at: u64, funded: i128) {
+    env.events().publish(
+        (symbol_short!("esc_fund"),),
+        EscrowFundedEvent { invoice_id, release_at, funded },
+    );
+}
