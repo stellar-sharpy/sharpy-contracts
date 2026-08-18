@@ -810,3 +810,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add dispute timeout mechanism - PR #22
 
 // Feature: refactor event emission logic - PR #23
+
+// Feature: add discount rules support - PR #24
