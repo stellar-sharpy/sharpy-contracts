@@ -784,3 +784,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add invoice template storage - PR #9
 
 // Feature: add pause/resume for recurring invoices - PR #10
+
+// Feature: add split rule validation tests - PR #11
