@@ -792,3 +792,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add payment routing logic - PR #13
 
 // Feature: optimize storage access patterns - PR #14
+
+// Feature: add invoice archival system - PR #15
