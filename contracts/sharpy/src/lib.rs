@@ -814,3 +814,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add discount rules support - PR #24
 
 // Feature: add gas usage tests - PR #25
+
+// Feature: add scheduled payment support - PR #26
