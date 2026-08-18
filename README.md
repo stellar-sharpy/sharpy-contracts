@@ -2,7 +2,7 @@
 
 ![Soroban](https://img.shields.io/badge/Soroban-Protocol%2027-6C63FF?logo=stellar)
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
-![Tests](https://img.shields.io/badge/tests-43%20passing-00D4AA)
+![Tests](https://img.shields.io/badge/tests-92%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-0.2.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
@@ -69,10 +69,13 @@ graph TD
 - **Escrow dispute mechanism** — arbitrator can intervene before release
 - **Batch invoice creation** — up to 10 invoices in a single transaction
 - **Pool payments** — pay multiple invoices across different tokens in one call
-- **Structured events** — for all lifecycle actions (created, payment, released, refunded)
+- **Structured events** — for all lifecycle actions (created, payment, released, refunded, cancelled, escrow_funded)
 - **Invoice stats** — funded/total/completion_bps/unique_payers via `get_invoice_stats`
 - **Full audit log** — on-chain audit trail per invoice
 - **Admin circuit breaker** — pause/unpause contract
+- **Payer index** — `get_invoices_by_payer` tracks all invoices a payer touched (via `pay` and `pool_pay`)
+- **Creator index** — `get_invoices_by_creator` for dashboard pagination
+- **Fallback balance recovery** — `claim()` + `get_claimable_balance()` for failed recipient transfers (CEI pattern)
 - **Storage TTL auto-extended** — ~1 year on every write
 
 ---
@@ -112,7 +115,10 @@ graph TD
 | `get_escrow_state(id)` | Current escrow/dispute state |
 | `bump_invoice_ttl(id)` | Extend invoice storage TTL to prevent archival (Protocol 26 CAP-78) |
 | `get_invoice_count()` | Total number of invoices ever created — O(1) global stat |
+| `get_invoices_by_creator(creator)` | All invoice IDs created by an address |
 | `get_invoices_by_payer(payer)` | All invoice IDs paid by a given address (payer index) |
+| `get_claimable_balance(account, token)` | Claimable balance for account after failed transfer |
+| `claim(account, token)` | Withdraw credited balance for account/token |
 | `pause` / `unpause` | Admin circuit breaker |
 
 ---
@@ -143,7 +149,7 @@ sharpy-contracts/
 │       ├── lib.rs                   # All contract logic (600+ lines)
 │       ├── types.rs                 # Invoice, SplitRule, AuditEntry, etc.
 │       ├── events.rs                # Structured event helpers
-│       └── test.rs                  # 43 unit tests
+│       └── test.rs                  # 92 unit tests
 └── .github/
     ├── workflows/ci.yml             # Test + WASM build on every PR
     └── ISSUE_TEMPLATE/              # Bug report, feature request
@@ -154,7 +160,7 @@ sharpy-contracts/
 ## Build & Test
 
 ```bash
-make test           # cargo test (24 passing)
+make test           # cargo test (92 passing)
 make build          # build WASM
 make optimize       # optimize WASM with stellar contract optimize
 make deploy-testnet # deploy to testnet
