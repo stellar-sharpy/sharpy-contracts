@@ -800,3 +800,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add multi-signature support prep - PR #17
 
 // Feature: add invoice categorization - PR #18
+
+// Feature: add payment amount limits - PR #19
