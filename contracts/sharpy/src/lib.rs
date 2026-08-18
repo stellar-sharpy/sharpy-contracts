@@ -806,3 +806,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add concurrent payment tests - PR #20
 
 // Feature: add attachment hash storage - PR #21
+
+// Feature: add dispute timeout mechanism - PR #22
