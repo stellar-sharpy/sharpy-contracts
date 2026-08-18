@@ -812,3 +812,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: refactor event emission logic - PR #23
 
 // Feature: add discount rules support - PR #24
+
+// Feature: add gas usage tests - PR #25
