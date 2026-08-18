@@ -776,3 +776,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: enhance multi-currency handling - PR #5
 
 // Feature: add payment memo support - PR #6
+
+// Feature: add escrow edge case tests - PR #7
