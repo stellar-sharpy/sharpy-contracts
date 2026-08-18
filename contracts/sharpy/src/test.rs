@@ -2279,3 +2279,163 @@ mod test_invoice_stats_and_escrow_state {
         assert!(state.is_none(), "non-escrow invoice should return None from get_escrow_state");
     }
 }
+
+#[cfg(test)]
+mod test_validation_and_multi_recipient {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::InvoiceOptions, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    fn no_rules(env: &Env) -> InvoiceOptions {
+        InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: soroban_sdk::vec![env],
+            auto_resolve_rules: soroban_sdk::vec![env],
+            arbitrator: None,
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "deadline must be in the future")]
+    fn test_create_invoice_past_deadline_panics() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        // Advance time so we can use a past timestamp
+        env.ledger().set_timestamp(1_000_000);
+        let past_deadline = 999_999u64; // strictly in the past
+
+        client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &past_deadline,
+            &no_rules(&env),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "amounts must be positive")]
+    fn test_create_invoice_zero_amount_panics() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 0i128], // zero amount
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "only creator can cancel")]
+    fn test_cancel_invoice_by_non_creator_panics() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        client.cancel_invoice(&stranger, &id); // Not the creator
+    }
+
+    #[test]
+    fn test_multi_recipient_proportional_release() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let r3 = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        sac.mint(&payer, &12_000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        // 3 recipients: 50/30/20 proportional split = 6000/3600/2400
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, r1.clone(), r2.clone(), r3.clone()],
+            &soroban_sdk::vec![&env, 6000i128, 3600i128, 2400i128],
+            &soroban_sdk::vec![&env, tok.clone(), tok.clone(), tok.clone()],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        client.pay(&payer, &id, &12_000i128); // fully fund
+
+        // Use preview_payout to verify distribution
+        let payouts = client.preview_payout(&id, &12_000i128);
+        assert_eq!(payouts.get(0).unwrap(), 6000i128);
+        assert_eq!(payouts.get(1).unwrap(), 3600i128);
+        assert_eq!(payouts.get(2).unwrap(), 2400i128);
+        // Verify no dust lost
+        let sum: i128 = payouts.iter().sum();
+        assert_eq!(sum, 12_000i128, "all funds distributed — no dust");
+    }
+
+    #[test]
+    fn test_invoice_stats_fully_funded_completion_bps_is_10000() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        sac.mint(&payer, &5000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 2000i128],
+            &soroban_sdk::vec![&env, tok],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        client.pay(&payer, &id, &2000i128); // fully funded → auto-released
+
+        // Stats should reflect fully-funded state (10_000 bps = 100%)
+        // Note: after release the invoice is no longer Pending, stats still readable
+        let stats = client.get_invoice_stats(&id);
+        assert_eq!(stats.completion_bps, 10_000u32, "fully funded invoice must have completion_bps = 10_000");
+        assert_eq!(stats.funded, 2000i128);
+    }
+}
