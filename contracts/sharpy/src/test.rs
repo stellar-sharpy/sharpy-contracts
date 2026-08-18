@@ -1088,16 +1088,118 @@ mod tests {
         let paid = client.get_invoices_by_payer(&payer);
         assert_eq!(paid.len(), 1, "same invoice paid twice should only appear once in payer index");
     }
+
+    #[test]
+    #[should_panic(expected = "payment amount must be positive")]
+    fn test_zero_amount_payment_fails() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [1000i128]), &Vec::from_array(&env, [token.clone()]), &deadline, &default_options(&env));
+        client.pay(&creator, &id, &0i128); // Should fail
+    }
 }
 
-#[test]
-#[should_panic(expected = "payment amount must be positive")]
-fn test_zero_amount_payment_fails() {
-    let (env, client) = setup();
-    let creator = Address::generate(&env);
-    let recipient = Address::generate(&env);
-    let token = Address::generate(&env);
-    let deadline = env.ledger().timestamp() + 86400;
-    let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [1000i128]), &Vec::from_array(&env, [token.clone()]), &deadline, &default_options(&env));
-    client.pay(&creator, &id, &0i128); // Should fail
+#[cfg(test)]
+mod test_get_invoices_by_creator {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{
+        types::{InvoiceOptions, InvoiceStatus},
+        SharpyContractClient,
+    };
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    fn default_options(env: &Env) -> InvoiceOptions {
+        InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: soroban_sdk::vec![env],
+            auto_resolve_rules: soroban_sdk::vec![env],
+            arbitrator: None,
+        }
+    }
+
+    #[test]
+    fn test_creator_index_populated_on_create() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id1 = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &default_options(&env),
+        );
+        let id2 = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 2000i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &default_options(&env),
+        );
+
+        let by_creator = client.get_invoices_by_creator(&creator);
+        assert_eq!(by_creator.len(), 2, "creator index should have 2 entries");
+        assert!(by_creator.contains(&id1));
+        assert!(by_creator.contains(&id2));
+    }
+
+    #[test]
+    fn test_creator_index_empty_for_new_address() {
+        let (env, client) = setup();
+        let stranger = Address::generate(&env);
+        let by_creator = client.get_invoices_by_creator(&stranger);
+        assert_eq!(by_creator.len(), 0, "unknown creator should return empty vec");
+    }
+
+    #[test]
+    fn test_creator_index_does_not_cross_contaminate() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin);
+        let creator_a = Address::generate(&env);
+        let creator_b = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        client.create_invoice(
+            &creator_a,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 500i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &default_options(&env),
+        );
+        client.create_invoice(
+            &creator_b,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 500i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &default_options(&env),
+        );
+
+        assert_eq!(client.get_invoices_by_creator(&creator_a).len(), 1);
+        assert_eq!(client.get_invoices_by_creator(&creator_b).len(), 1);
+    }
 }
