@@ -1445,3 +1445,100 @@ mod test_invoice_count_and_cancel_audit {
         assert_eq!(invoice.status, InvoiceStatus::Cancelled, "unfunded cancellation should be Cancelled, not Refunded");
     }
 }
+
+#[cfg(test)]
+mod test_pause_circuit_breaker {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::InvoiceOptions, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client, admin)
+    }
+
+    fn no_rules(env: &Env) -> InvoiceOptions {
+        InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: soroban_sdk::vec![env],
+            auto_resolve_rules: soroban_sdk::vec![env],
+            arbitrator: None,
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_create_invoice_blocked_when_paused() {
+        let (env, client, _admin) = setup();
+        client.pause();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+    }
+
+    #[test]
+    fn test_unpause_restores_functionality() {
+        let (env, client, _admin) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        client.pause();
+        client.unpause();
+
+        // Should succeed after unpause
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+        assert!(id > 0, "create_invoice should succeed after unpause");
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is paused")]
+    fn test_pay_blocked_when_paused() {
+        let (env, client, _admin) = setup();
+        let admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract(admin.clone());
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let sac = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+        sac.mint(&payer, &5000i128);
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        client.pause();
+        client.pay(&payer, &id, &1000i128); // Should panic
+    }
+}
