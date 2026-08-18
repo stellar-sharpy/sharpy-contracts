@@ -794,3 +794,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: optimize storage access patterns - PR #14
 
 // Feature: add invoice archival system - PR #15
+
+// Feature: add deadline edge case tests - PR #16
