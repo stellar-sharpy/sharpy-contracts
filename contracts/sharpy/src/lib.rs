@@ -283,6 +283,7 @@ impl SharpyContract {
                 let release_at = env.ledger().timestamp() + invoice.escrow_release_delay;
                 let state = DisputeState { release_at, disputed: false, disputed_at: 0 };
                 env.storage().persistent().set(&escrow_state_key(invoice_id), &state);
+                events::escrow_funded(&env, invoice_id, release_at, invoice.funded);
                 save_invoice(&env, invoice_id, &invoice);
             } else {
                 Self::_release(&env, invoice_id, &mut invoice, &payer);
@@ -329,6 +330,7 @@ impl SharpyContract {
                     let release_at = env.ledger().timestamp() + inv.escrow_release_delay;
                     let state = DisputeState { release_at, disputed: false, disputed_at: 0 };
                     env.storage().persistent().set(&escrow_state_key(p.invoice_id), &state);
+                    events::escrow_funded(&env, p.invoice_id, release_at, inv.funded);
                     save_invoice(&env, p.invoice_id, &inv);
                 } else {
                     Self::_release(&env, p.invoice_id, &mut inv, &payer);
