@@ -562,6 +562,8 @@ impl SharpyContract {
 
         save_invoice(&env, invoice_id, &invoice);
         append_audit(&env, invoice_id, symbol_short!("cancel"), &caller);
+        let refunded = if invoice.status == InvoiceStatus::Refunded { invoice.funded } else { 0 };
+        events::invoice_cancelled(&env, invoice_id, &caller, refunded);
     }
 
     pub fn get_invoice(env: Env, invoice_id: u64) -> Invoice {

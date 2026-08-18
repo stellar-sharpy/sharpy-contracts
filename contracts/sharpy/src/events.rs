@@ -95,3 +95,18 @@ pub struct AccountBalanceClaimedEvent {
 pub fn account_balance_claimed(env: &Env, account: &Address, token: &Address, amount: i128) {
     env.events().publish((symbol_short!("claimed"),), AccountBalanceClaimedEvent { account: account.clone(), token: token.clone(), amount });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceCancelledEvent {
+    pub invoice_id: u64,
+    pub creator: Address,
+    pub refunded_amount: i128,
+}
+
+pub fn invoice_cancelled(env: &Env, invoice_id: u64, creator: &Address, refunded_amount: i128) {
+    env.events().publish(
+        (symbol_short!("cancel"),),
+        InvoiceCancelledEvent { invoice_id, creator: creator.clone(), refunded_amount },
+    );
+}
