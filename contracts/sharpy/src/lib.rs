@@ -778,3 +778,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add payment memo support - PR #6
 
 // Feature: add escrow edge case tests - PR #7
+
+// Feature: add batch refund functionality - PR #8
