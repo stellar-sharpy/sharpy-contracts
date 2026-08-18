@@ -131,3 +131,11 @@ pub struct InvoiceStats {
     pub unique_payers: u32,
     pub completion_bps: u32,
 }
+
+// Memo field for invoice metadata
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceMemo {
+    pub text: soroban_sdk::String,
+    pub created_at: u64,
+}
