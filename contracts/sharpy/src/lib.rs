@@ -822,3 +822,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add weighted recipient splits - PR #28
 
 // Feature: add stress test suite - PR #29
+
+// Feature: improve inline docs - PR #30
