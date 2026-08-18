@@ -802,3 +802,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add invoice categorization - PR #18
 
 // Feature: add payment amount limits - PR #19
+
+// Feature: add concurrent payment tests - PR #20
