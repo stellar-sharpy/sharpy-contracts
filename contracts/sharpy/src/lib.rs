@@ -818,3 +818,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add scheduled payment support - PR #26
 
 // Feature: add auto-expiry actions - PR #27
+
+// Feature: add weighted recipient splits - PR #28
