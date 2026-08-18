@@ -2140,3 +2140,142 @@ mod test_refund_and_dispute_lifecycle {
         client.bump_invoice_ttl(&id);
     }
 }
+
+#[cfg(test)]
+mod test_invoice_stats_and_escrow_state {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::InvoiceOptions, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    fn no_rules(env: &Env) -> InvoiceOptions {
+        InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: soroban_sdk::vec![env],
+            auto_resolve_rules: soroban_sdk::vec![env],
+            arbitrator: None,
+        }
+    }
+
+    #[test]
+    fn test_invoice_stats_unfunded() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        let stats = client.get_invoice_stats(&id);
+        assert_eq!(stats.funded, 0i128);
+        assert_eq!(stats.total, 1000i128);
+        assert_eq!(stats.completion_bps, 0u32);
+        assert_eq!(stats.payment_count, 0u32);
+        assert_eq!(stats.unique_payers, 0u32);
+    }
+
+    #[test]
+    fn test_invoice_stats_partial_payment() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        sac.mint(&payer, &5000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 4000i128],
+            &soroban_sdk::vec![&env, tok],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        client.pay(&payer, &id, &1000i128); // 25% funded
+
+        let stats = client.get_invoice_stats(&id);
+        assert_eq!(stats.funded, 1000i128);
+        assert_eq!(stats.total, 4000i128);
+        assert_eq!(stats.completion_bps, 2500u32); // 25% = 2500 bps
+        assert_eq!(stats.payment_count, 1u32);
+        assert_eq!(stats.unique_payers, 1u32);
+    }
+
+    #[test]
+    fn test_invoice_stats_multiple_unique_payers() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer1 = Address::generate(&env);
+        let payer2 = Address::generate(&env);
+
+        sac.mint(&payer1, &2000i128);
+        sac.mint(&payer2, &2000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 5000i128],
+            &soroban_sdk::vec![&env, tok],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        client.pay(&payer1, &id, &1000i128);
+        client.pay(&payer2, &id, &1000i128);
+        client.pay(&payer1, &id, &1000i128); // payer1 pays again — still 2 unique
+
+        let stats = client.get_invoice_stats(&id);
+        assert_eq!(stats.payment_count, 3u32, "3 total payments");
+        assert_eq!(stats.unique_payers, 2u32, "only 2 unique payers despite 3 payments");
+    }
+
+    #[test]
+    fn test_get_escrow_state_none_for_non_escrow_invoice() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        let state = client.get_escrow_state(&id);
+        assert!(state.is_none(), "non-escrow invoice should return None from get_escrow_state");
+    }
+}
