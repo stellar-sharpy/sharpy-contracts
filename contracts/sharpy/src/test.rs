@@ -1959,3 +1959,184 @@ mod test_payer_total_and_fingerprint {
         client.pool_pay(&payer, &soroban_sdk::vec![&env]);
     }
 }
+
+#[cfg(test)]
+mod test_refund_and_dispute_lifecycle {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::{InvoiceOptions, InvoiceStatus}, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    fn no_rules(env: &Env) -> InvoiceOptions {
+        InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: soroban_sdk::vec![env],
+            auto_resolve_rules: soroban_sdk::vec![env],
+            arbitrator: None,
+        }
+    }
+
+    #[test]
+    fn test_refund_after_deadline_restores_payer_funds() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        sac.mint(&payer, &5000i128);
+
+        let deadline = env.ledger().timestamp() + 100;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 3000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        client.pay(&payer, &id, &1500i128);
+
+        // Advance past deadline
+        env.ledger().set_timestamp(env.ledger().timestamp() + 200);
+        client.refund(&id);
+
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.status, InvoiceStatus::Refunded, "status must be Refunded after deadline refund");
+    }
+
+    #[test]
+    #[should_panic(expected = "deadline has not passed")]
+    fn test_refund_before_deadline_panics() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        client.refund(&id); // Should panic — deadline not passed
+    }
+
+    #[test]
+    fn test_dispute_resolve_to_release() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let arbitrator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        sac.mint(&payer, &5000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &InvoiceOptions {
+                escrow_enabled: true,
+                escrow_release_delay: Some(1000u64),
+                split_rules: soroban_sdk::vec![&env],
+                auto_resolve_rules: soroban_sdk::vec![&env],
+                arbitrator: Some(arbitrator.clone()),
+            },
+        );
+
+        client.pay(&payer, &id, &1000i128);
+        client.dispute_release(&id);
+
+        let state = client.get_escrow_state(&id).expect("escrow state should exist");
+        assert!(state.disputed, "dispute flag must be true after dispute_release");
+
+        // Arbitrator resolves — release = true
+        client.resolve_dispute(&id, &true);
+
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.status, InvoiceStatus::Released, "resolve with release=true should set Released status");
+    }
+
+    #[test]
+    fn test_dispute_resolve_to_refund() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let arbitrator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        sac.mint(&payer, &5000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &InvoiceOptions {
+                escrow_enabled: true,
+                escrow_release_delay: Some(1000u64),
+                split_rules: soroban_sdk::vec![&env],
+                auto_resolve_rules: soroban_sdk::vec![&env],
+                arbitrator: Some(arbitrator.clone()),
+            },
+        );
+
+        client.pay(&payer, &id, &1000i128);
+        client.dispute_release(&id);
+        client.resolve_dispute(&id, &false); // refund
+
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.status, InvoiceStatus::Refunded, "resolve with release=false should set Refunded status");
+    }
+
+    #[test]
+    fn test_bump_invoice_ttl_does_not_panic() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        // Should succeed without panic
+        client.bump_invoice_ttl(&id);
+    }
+}
