@@ -1089,3 +1089,15 @@ mod tests {
         assert_eq!(paid.len(), 1, "same invoice paid twice should only appear once in payer index");
     }
 }
+
+#[test]
+#[should_panic(expected = "payment amount must be positive")]
+fn test_zero_amount_payment_fails() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let token = Address::generate(&env);
+    let deadline = env.ledger().timestamp() + 86400;
+    let id = client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [1000i128]), &Vec::from_array(&env, [token.clone()]), &deadline, &default_options(&env));
+    client.pay(&creator, &id, &0i128); // Should fail
+}
