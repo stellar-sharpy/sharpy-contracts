@@ -1789,3 +1789,173 @@ mod test_recurring_chain {
         assert!(next_id.is_none(), "max_recurrences=1 means no next invoice should be created");
     }
 }
+
+#[cfg(test)]
+mod test_payer_total_and_fingerprint {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::{InvoiceOptions, SplitRule}, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    fn no_rules(env: &Env) -> InvoiceOptions {
+        InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: soroban_sdk::vec![env],
+            auto_resolve_rules: soroban_sdk::vec![env],
+            arbitrator: None,
+        }
+    }
+
+    #[test]
+    fn test_get_payer_total_aggregates_multiple_payments() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        sac.mint(&payer, &5000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 3000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        client.pay(&payer, &id, &1000i128);
+        client.pay(&payer, &id, &1000i128);
+
+        let total = client.get_payer_total(&id, &payer);
+        assert_eq!(total, 2000i128, "payer total should sum all payments from that address");
+    }
+
+    #[test]
+    fn test_get_payer_total_zero_for_non_payer() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        assert_eq!(client.get_payer_total(&id, &stranger), 0i128, "non-payer should have 0 total");
+    }
+
+    #[test]
+    fn test_invoice_fingerprint_is_deterministic() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        let fp1 = client.get_invoice_fingerprint(&id);
+        let fp2 = client.get_invoice_fingerprint(&id);
+        assert_eq!(fp1, fp2, "fingerprint must be deterministic — same call returns same hash");
+    }
+
+    #[test]
+    fn test_invoice_fingerprint_differs_between_invoices() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id1 = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &no_rules(&env),
+        );
+        let id2 = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 2000i128], // different amount → different hash
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &no_rules(&env),
+        );
+
+        let fp1 = client.get_invoice_fingerprint(&id1);
+        let fp2 = client.get_invoice_fingerprint(&id2);
+        assert_ne!(fp1, fp2, "fingerprints must differ between invoices with different amounts");
+    }
+
+    #[test]
+    #[should_panic(expected = "split rules exceed 100%")]
+    fn test_percentage_split_rules_over_100_bps_panics() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+
+        // 7000 + 5000 = 12000 bps > 10000 — should panic
+        let rules = soroban_sdk::vec![
+            &env,
+            SplitRule::Percentage(7000u32),
+            SplitRule::Percentage(5000u32),
+        ];
+        client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, r1, r2],
+            &soroban_sdk::vec![&env, 700i128, 500i128],
+            &soroban_sdk::vec![&env, token.clone(), token.clone()],
+            &deadline,
+            &InvoiceOptions {
+                escrow_enabled: false,
+                escrow_release_delay: None,
+                split_rules: rules,
+                auto_resolve_rules: soroban_sdk::vec![&env],
+                arbitrator: None,
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "payments must not be empty")]
+    fn test_pool_pay_empty_vec_panics() {
+        let (env, client) = setup();
+        let payer = Address::generate(&env);
+        client.pool_pay(&payer, &soroban_sdk::vec![&env]);
+    }
+}
