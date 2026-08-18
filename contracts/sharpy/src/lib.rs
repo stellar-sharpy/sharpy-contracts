@@ -774,3 +774,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add invoice tagging system - PR #4
 
 // Feature: enhance multi-currency handling - PR #5
+
+// Feature: add payment memo support - PR #6
