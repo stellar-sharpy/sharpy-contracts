@@ -788,3 +788,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add split rule validation tests - PR #11
 
 // Feature: add extended invoice metadata - PR #12
+
+// Feature: add payment routing logic - PR #13
