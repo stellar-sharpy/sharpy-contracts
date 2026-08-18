@@ -1631,3 +1631,161 @@ mod test_batch_creator_index {
         assert_eq!(client.get_invoice_count(), 2u64, "invoice counter should reflect all batch items");
     }
 }
+
+#[cfg(test)]
+mod test_tiered_split {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::{InvoiceOptions, SplitRule}, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    #[test]
+    fn test_tiered_split_below_threshold_pays_zero() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        // Threshold = 10_000, so below that recipient gets 0
+        let rules = soroban_sdk::vec![&env, SplitRule::Tiered(10_000i128, 5000u32)];
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, r1.clone()],
+            &soroban_sdk::vec![&env, 5000i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &InvoiceOptions {
+                escrow_enabled: false,
+                escrow_release_delay: None,
+                split_rules: rules,
+                auto_resolve_rules: soroban_sdk::vec![&env],
+                arbitrator: None,
+            },
+        );
+        // Amount 5000 < threshold 10_000 — preview should return 0
+        let payouts = client.preview_payout(&id, &5000i128);
+        assert_eq!(payouts.get(0).unwrap(), 0i128, "below threshold, tiered payout must be 0");
+    }
+
+    #[test]
+    fn test_tiered_split_above_threshold_pays_percentage() {
+        let (env, client) = setup();
+        let token = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let r1 = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        // Threshold = 5_000, bps = 5000 (50%)
+        let rules = soroban_sdk::vec![&env, SplitRule::Tiered(5_000i128, 5000u32)];
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, r1.clone()],
+            &soroban_sdk::vec![&env, 10_000i128],
+            &soroban_sdk::vec![&env, token.clone()],
+            &deadline,
+            &InvoiceOptions {
+                escrow_enabled: false,
+                escrow_release_delay: None,
+                split_rules: rules,
+                auto_resolve_rules: soroban_sdk::vec![&env],
+                arbitrator: None,
+            },
+        );
+        // Amount 10_000 > threshold 5_000 — 50% = 5_000
+        let payouts = client.preview_payout(&id, &10_000i128);
+        assert_eq!(payouts.get(0).unwrap(), 5_000i128, "above threshold, tiered payout must be 50% of funded");
+    }
+}
+
+#[cfg(test)]
+mod test_recurring_chain {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::InvoiceStatus, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    #[test]
+    fn test_recurring_release_spawns_next_invoice() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        sac.mint(&payer, &5000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+        let interval = 86400u64;
+
+        let id = client.create_recurring(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &interval,
+            &3u32,
+        );
+
+        client.pay(&payer, &id, &1000i128);
+
+        let next_id = client.get_next_recurring(&id);
+        assert!(next_id.is_some(), "releasing recurring invoice should spawn next invoice");
+
+        let next = client.get_invoice(&next_id.unwrap());
+        assert_eq!(next.status, InvoiceStatus::Pending, "next recurring invoice should be Pending");
+        assert_eq!(next.amounts.get(0).unwrap(), 1000i128, "next invoice should have same amount");
+    }
+
+    #[test]
+    fn test_recurring_stops_at_max_recurrences() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+
+        sac.mint(&payer, &10_000i128);
+
+        let deadline = env.ledger().timestamp() + 86400;
+
+        // max_recurrences = 1 means only the first invoice — no next one should spawn
+        let id = client.create_recurring(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &86400u64,
+            &1u32,
+        );
+
+        client.pay(&payer, &id, &1000i128);
+
+        let next_id = client.get_next_recurring(&id);
+        assert!(next_id.is_none(), "max_recurrences=1 means no next invoice should be created");
+    }
+}
