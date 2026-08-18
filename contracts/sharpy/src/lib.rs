@@ -782,3 +782,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add batch refund functionality - PR #8
 
 // Feature: add invoice template storage - PR #9
+
+// Feature: add pause/resume for recurring invoices - PR #10
