@@ -808,3 +808,5 @@ fn validate_token_address(env: &Env, token: &Address) {
 // Feature: add attachment hash storage - PR #21
 
 // Feature: add dispute timeout mechanism - PR #22
+
+// Feature: refactor event emission logic - PR #23
