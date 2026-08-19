@@ -760,6 +760,12 @@ impl SharpyContract {
         env.storage().persistent().get(&counter_key()).unwrap_or(0u64)
     }
 
+    /// Returns the treasury address set during `initialize`.
+    /// Admin-facing query for protocol dashboards and treasury management tools.
+    pub fn get_treasury(env: Env) -> Address {
+        env.storage().instance().get(&treasury_key()).expect("treasury not set")
+    }
+
     /// Returns all invoice IDs that a given address has paid toward.
     /// Indexed on every pay() call — O(1) write, O(n) read where n = unique invoices paid.
     /// Deduplicates: paying the same invoice multiple times only adds one entry.
