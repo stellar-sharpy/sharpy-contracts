@@ -33,8 +33,18 @@ fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
 }
 
+/// Convenience macro that mirrors Solidity's `require(cond, msg)`.
+/// Panics with the given string literal when `$cond` is false.
+/// Prefer this over raw `assert!` for user-facing guards — the message is
+/// visible in transaction error metadata and test output.
+macro_rules! require {
+    ($cond:expr, $msg:literal) => {
+        assert!($cond, $msg)
+    };
+}
+
 fn require_not_paused(env: &Env) {
-    assert!(!is_paused(env), "contract is paused");
+    require!(!is_paused(env), "contract is paused");
 }
 
 fn require_admin(env: &Env) {
