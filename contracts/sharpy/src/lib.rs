@@ -868,6 +868,14 @@ impl SharpyContract {
         save_invoice(&env, invoice_id, &invoice);
         append_audit(&env, invoice_id, symbol_short!("unfreeze"), &env.current_contract_address());
     }
+
+    /// Returns the subscription (recurring) configuration for a recurring invoice.
+    /// Includes creator, recipients, amounts, tokens, interval, max_recurrences,
+    /// and num_created (how many invoices have been generated so far in the chain).
+    /// Returns None for non-recurring invoices.
+    pub fn get_recurring_params(env: Env, invoice_id: u64) -> Option<SubscriptionParams> {
+        env.storage().persistent().get(&recurring_params_key(invoice_id))
+    }
 }
 
 /// Validates that a token address is not the zero address.
