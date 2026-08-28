@@ -400,17 +400,7 @@ impl SharpyContract {
         if release {
             Self::_release(&env, invoice_id, &mut invoice, &resolver);
         } else {
-            let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
-            let mut totals: Map<Address, i128> = Map::new(&env);
-            for payment in invoice.payments.iter() {
-                let prev = totals.get(payment.payer.clone()).unwrap_or(0);
-                totals.set(payment.payer.clone(), prev + payment.amount);
-            }
-            for (payer, amount) in totals.iter() {
-                token_client.transfer(&env.current_contract_address(), &payer, &amount);
-                events::payer_refunded(&env, invoice_id, &payer, amount);
-            }
-
+            Self::_refund_payers(&env, invoice_id, &invoice);
             invoice.status = InvoiceStatus::Refunded;
             invoice.completion_time = Some(env.ledger().timestamp());
             save_invoice(&env, invoice_id, &invoice);
@@ -531,16 +521,7 @@ impl SharpyContract {
         assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
         assert!(env.ledger().timestamp() > invoice.deadline, "deadline has not passed");
 
-        let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
-        let mut totals: Map<Address, i128> = Map::new(&env);
-        for payment in invoice.payments.iter() {
-            let prev = totals.get(payment.payer.clone()).unwrap_or(0);
-            totals.set(payment.payer.clone(), prev + payment.amount);
-        }
-        for (payer, amount) in totals.iter() {
-            token_client.transfer(&env.current_contract_address(), &payer, &amount);
-            events::payer_refunded(&env, invoice_id, &payer, amount);
-        }
+        Self::_refund_payers(&env, invoice_id, &invoice);
 
         invoice.status = InvoiceStatus::Refunded;
         invoice.completion_time = Some(env.ledger().timestamp());
@@ -558,16 +539,7 @@ impl SharpyContract {
         assert!(invoice.creator == caller, "only creator can cancel");
 
         if invoice.funded > 0 {
-            let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
-            let mut totals: Map<Address, i128> = Map::new(&env);
-            for payment in invoice.payments.iter() {
-                let prev = totals.get(payment.payer.clone()).unwrap_or(0);
-                totals.set(payment.payer.clone(), prev + payment.amount);
-            }
-            for (payer, amount) in totals.iter() {
-                token_client.transfer(&env.current_contract_address(), &payer, &amount);
-                events::payer_refunded(&env, invoice_id, &payer, amount);
-            }
+            Self::_refund_payers(&env, invoice_id, &invoice);
             invoice.status = InvoiceStatus::Refunded;
         } else {
             invoice.status = InvoiceStatus::Cancelled;
@@ -577,6 +549,22 @@ impl SharpyContract {
         append_audit(&env, invoice_id, symbol_short!("cancel"), &caller);
         let refunded = if invoice.status == InvoiceStatus::Refunded { invoice.funded } else { 0 };
         events::invoice_cancelled(&env, invoice_id, &caller, refunded);
+    }
+
+    /// Internal helper — refund all payers and emit per-payer events.
+    /// Aggregates payments by payer address to produce one transfer per payer.
+    /// Used by `refund`, `cancel_invoice`, and `resolve_dispute` (release=false).
+    fn _refund_payers(env: &Env, invoice_id: u64, invoice: &Invoice) {
+        let token_client = token::Client::new(env, &invoice.tokens.get(0).expect("no token"));
+        let mut totals: Map<Address, i128> = Map::new(env);
+        for payment in invoice.payments.iter() {
+            let prev = totals.get(payment.payer.clone()).unwrap_or(0);
+            totals.set(payment.payer.clone(), prev + payment.amount);
+        }
+        for (payer, amount) in totals.iter() {
+            token_client.transfer(&env.current_contract_address(), &payer, &amount);
+            events::payer_refunded(env, invoice_id, &payer, amount);
+        }
     }
 
     pub fn get_invoice(env: Env, invoice_id: u64) -> Invoice {
