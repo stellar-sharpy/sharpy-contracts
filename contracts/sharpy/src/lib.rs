@@ -758,11 +758,18 @@ impl SharpyContract {
         env.storage().persistent().get(&counter_key()).unwrap_or(0u64)
     }
 
+
     /// Returns the schema version of the invoice — always 1 for current contracts.
     /// Useful for forward-compatibility checks in off-chain indexers and SDKs
     /// when multiple contract versions may be deployed simultaneously.
     pub fn get_invoice_version(env: Env, invoice_id: u64) -> u32 {
         load_invoice(&env, invoice_id).version
+    }
+
+    /// Returns the treasury address set during `initialize`.
+    /// Admin-facing query for protocol dashboards and treasury management tools.
+    pub fn get_treasury(env: Env) -> Address {
+        env.storage().instance().get(&treasury_key()).expect("treasury not set")
     }
 
     /// Returns all invoice IDs that a given address has paid toward.
