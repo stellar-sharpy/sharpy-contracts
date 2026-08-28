@@ -275,6 +275,7 @@ impl SharpyContract {
         let mut invoice = load_invoice(&env, invoice_id);
         assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
         assert!(env.ledger().timestamp() <= invoice.deadline, "invoice deadline has passed");
+        assert!(!invoice.frozen, "invoice is frozen");
 
         let total: i128 = invoice.amounts.iter().sum();
         assert!(amount <= total - invoice.funded, "payment exceeds remaining balance");
@@ -802,6 +803,7 @@ impl SharpyContract {
         let mut invoice = load_invoice(&env, invoice_id);
         assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
         assert!(env.ledger().timestamp() <= invoice.deadline, "invoice deadline has passed");
+        assert!(!invoice.frozen, "invoice is frozen");
 
         let total: i128 = invoice.amounts.iter().sum();
         assert!(amount <= total - invoice.funded, "payment exceeds remaining balance");
@@ -836,6 +838,35 @@ impl SharpyContract {
         } else {
             save_invoice(&env, invoice_id, &invoice);
         }
+    }
+
+    /// Freezes an invoice — blocks any further `pay()` calls on that invoice.
+    /// Admin-only. Sets `invoice.frozen = true`.
+    /// Use `unfreeze_invoice` to re-enable payments.
+    ///
+    /// # Panics
+    /// - `"invoice is already frozen"` if already frozen
+    pub fn freeze_invoice(env: Env, invoice_id: u64) {
+        require_admin(&env);
+        let mut invoice = load_invoice(&env, invoice_id);
+        assert!(!invoice.frozen, "invoice is already frozen");
+        invoice.frozen = true;
+        save_invoice(&env, invoice_id, &invoice);
+        append_audit(&env, invoice_id, symbol_short!("freeze"), &env.current_contract_address());
+    }
+
+    /// Unfreezes a previously frozen invoice — re-enables payments.
+    /// Admin-only.
+    ///
+    /// # Panics
+    /// - `"invoice is not frozen"` if not currently frozen
+    pub fn unfreeze_invoice(env: Env, invoice_id: u64) {
+        require_admin(&env);
+        let mut invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.frozen, "invoice is not frozen");
+        invoice.frozen = false;
+        save_invoice(&env, invoice_id, &invoice);
+        append_audit(&env, invoice_id, symbol_short!("unfreeze"), &env.current_contract_address());
     }
 }
 
