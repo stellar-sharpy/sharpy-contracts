@@ -8,10 +8,10 @@ mod types;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
-    AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceOptions, InvoicePayment,
-    InvoiceStats, InvoiceStatus, Payment, SplitRule, SubscriptionParams,
+    AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
+    InvoicePayment, InvoiceStats, InvoiceStatus, Payment, SplitRule, SubscriptionParams,
 };
 
 fn admin_key() -> Symbol { symbol_short!("admin") }
@@ -28,6 +28,7 @@ fn payer_index_key(payer: &Address) -> (Symbol, Address) { (symbol_short!("by_py
 fn account_balance_key(account: &Address, token: &Address) -> (Symbol, Address, Address) {
     (symbol_short!("acc_bal"), account.clone(), token.clone())
 }
+fn invoice_notes_key(id: u64) -> (Symbol, u64) { (symbol_short!("notes"), id) }
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
@@ -875,6 +876,30 @@ impl SharpyContract {
     /// Returns None for non-recurring invoices.
     pub fn get_recurring_params(env: Env, invoice_id: u64) -> Option<SubscriptionParams> {
         env.storage().persistent().get(&recurring_params_key(invoice_id))
+    }
+
+    /// Attaches or replaces free-text notes on an invoice.
+    /// Only callable by the invoice creator.
+    /// Notes are stored under a separate key so the core invoice struct is unchanged.
+    /// Appends a `notes` audit entry on every call.
+    ///
+    /// # Panics
+    /// - `"only creator can set notes"` if caller != invoice.creator
+    pub fn set_invoice_notes(env: Env, caller: Address, invoice_id: u64, text: String) {
+        require_not_paused(&env);
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set notes");
+
+        let notes = InvoiceNotes { text, updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&invoice_notes_key(invoice_id), &notes);
+        env.storage().persistent().extend_ttl(&invoice_notes_key(invoice_id), 100_000, 6_307_200);
+        append_audit(&env, invoice_id, symbol_short!("notes"), &caller);
+    }
+
+    /// Returns the notes attached to an invoice, or None if none have been set.
+    pub fn get_invoice_notes(env: Env, invoice_id: u64) -> Option<InvoiceNotes> {
+        env.storage().persistent().get(&invoice_notes_key(invoice_id))
     }
 }
 

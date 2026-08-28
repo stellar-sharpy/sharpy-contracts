@@ -194,6 +194,18 @@ pub struct CreateInvoiceParams {
     pub deadline: u64,
 }
 
+/// Optional notes field stored per invoice.
+/// Set by the creator after invoice creation via `set_invoice_notes`.
+/// Pure metadata — not evaluated in any payment or release logic.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceNotes {
+    /// Free-form text description or memo for this invoice.
+    pub text: soroban_sdk::String,
+    /// Ledger timestamp when notes were last updated.
+    pub updated_at: u64,
+}
+
 /// Aggregated statistics for an invoice. Returned by `get_invoice_stats`.
 #[contracttype]
 #[derive(Clone, Debug)]
