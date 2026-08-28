@@ -2,6 +2,27 @@
 
 All notable changes to the Sharpy smart contract are documented here.
 
+## [Unreleased] - 2026-08-28 — Sprint: 7 features merged to main (92 tests passing)
+
+### Added
+- `get_invoice_version(id)` — returns invoice schema version (always 1) — `feat/get-invoice-version`
+- `get_treasury()` — admin query returning initialized treasury address — `feat/get-treasury`
+- `pay_with_tip(payer, id, amount, tip)` — gratuity routed to treasury, excluded from `funded` — `feat/pay-with-tip`
+- `freeze_invoice(id)` / `unfreeze_invoice(id)` — admin freeze blocks `pay`/`pay_with_tip`, `frozen` field guard — `feat/freeze-unfreeze-invoice`
+- `get_recurring_params(id)` — exposes full `SubscriptionParams` (None for non-recurring) — `feat/get-recurring-params`
+- `set_invoice_notes(caller, id, text)` / `get_invoice_notes(id)` — creator free-text `InvoiceNotes { text, updated_at }` — manual feat/invoice-notes
+- `get_invoices_by_creator` / `get_invoices_by_payer` / `get_invoice_count` already on main, now with new features integrated
+- `refactor: require!` macro — consistent panic messages
+- `refactor: _refund_payers` helper — deduplicates refund logic across `refund`, `cancel_invoice`, `resolve_dispute`
+
+### Changed
+- `pay()` and `pay_with_tip()` now check `invoice.frozen` before processing (`"invoice is frozen"` panic)
+- `types.rs` adds `InvoiceNotes` struct; `lib.rs` imports `String` and `InvoiceNotes`, adds `invoice_notes_key`
+
+### Verified
+- `cargo test` — 92 passed (no new tests added yet; handoff 120-test claim still pending tests for #115-#123)
+- `npm run build` sharpy-app — success with fixed `StatusBadge` typed pill (was placeholder stub)
+
 ## [0.2.0] - 2026-07-18
 
 ### Added
