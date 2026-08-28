@@ -758,6 +758,13 @@ impl SharpyContract {
         env.storage().persistent().get(&counter_key()).unwrap_or(0u64)
     }
 
+    /// Returns the schema version of the invoice — always 1 for current contracts.
+    /// Useful for forward-compatibility checks in off-chain indexers and SDKs
+    /// when multiple contract versions may be deployed simultaneously.
+    pub fn get_invoice_version(env: Env, invoice_id: u64) -> u32 {
+        load_invoice(&env, invoice_id).version
+    }
+
     /// Returns all invoice IDs that a given address has paid toward.
     /// Indexed on every pay() call — O(1) write, O(n) read where n = unique invoices paid.
     /// Deduplicates: paying the same invoice multiple times only adds one entry.
