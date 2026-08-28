@@ -781,6 +781,62 @@ impl SharpyContract {
             .get(&payer_index_key(&payer))
             .unwrap_or_else(|| Vec::new(&env))
     }
+
+    /// Pay toward an invoice with an optional tip.
+    /// The tip is transferred directly to the treasury on top of the invoice payment.
+    /// `tip` is stored on the Payment record but does NOT count toward `invoice.funded`
+    /// or `get_payer_total`. Set tip=0 to behave identically to `pay()`.
+    ///
+    /// # Panics
+    /// - `"payment amount must be positive"` if amount ≤ 0
+    /// - `"tip must be non-negative"` if tip < 0
+    /// - `"invoice is not pending"` if status != Pending
+    /// - `"invoice deadline has passed"` if past deadline
+    /// - `"payment exceeds remaining balance"` if amount > remaining
+    pub fn pay_with_tip(env: Env, payer: Address, invoice_id: u64, amount: i128, tip: i128) {
+        require_not_paused(&env);
+        payer.require_auth();
+        assert!(amount > 0, "payment amount must be positive");
+        assert!(tip >= 0, "tip must be non-negative");
+
+        let mut invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
+        assert!(env.ledger().timestamp() <= invoice.deadline, "invoice deadline has passed");
+
+        let total: i128 = invoice.amounts.iter().sum();
+        assert!(amount <= total - invoice.funded, "payment exceeds remaining balance");
+
+        let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
+
+        // Transfer invoice payment to contract vault
+        token_client.transfer(&payer, &env.current_contract_address(), &amount);
+
+        // Transfer tip directly to treasury (separate transfer, not held by contract)
+        if tip > 0 {
+            let treasury: Address = env.storage().instance().get(&treasury_key()).expect("treasury not set");
+            token_client.transfer(&payer, &treasury, &tip);
+        }
+
+        invoice.payments.push_back(Payment { payer: payer.clone(), amount, tip });
+        invoice.funded += amount;
+        index_invoice_for_payer(&env, &payer, invoice_id);
+        append_audit(&env, invoice_id, symbol_short!("pay"), &payer);
+        events::payment_received(&env, invoice_id, &payer, amount);
+
+        if invoice.funded >= total {
+            if invoice.escrow_enabled {
+                let release_at = env.ledger().timestamp() + invoice.escrow_release_delay;
+                let state = DisputeState { release_at, disputed: false, disputed_at: 0 };
+                env.storage().persistent().set(&escrow_state_key(invoice_id), &state);
+                events::escrow_funded(&env, invoice_id, release_at, invoice.funded);
+                save_invoice(&env, invoice_id, &invoice);
+            } else {
+                Self::_release(&env, invoice_id, &mut invoice, &payer);
+            }
+        } else {
+            save_invoice(&env, invoice_id, &invoice);
+        }
+    }
 }
 
 /// Validates that a token address is not the zero address.
