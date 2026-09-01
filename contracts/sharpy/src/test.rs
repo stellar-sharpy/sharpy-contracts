@@ -3412,3 +3412,39 @@ mod test_remaining_for_120 {
         assert!(notes.updated_at <= env.ledger().timestamp() + 5);
     }
 }
+
+#[cfg(test)]
+mod test_claim_cei_pattern {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, symbol_short};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    #[should_panic(expected = "no claimable balance")]
+    fn test_claim_cei_second_claim_panics() {
+        let (env, client)=setup();
+        let account=Address::generate(&env); let admin=Address::generate(&env);
+        let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        sac.mint(&client.address, &1000i128);
+        let key=(symbol_short!("acc_bal"), account.clone(), tok.clone());
+        env.as_contract(&client.address, || { env.storage().persistent().set(&key, &500i128); });
+        client.claim(&account, &tok);
+        // storage already deleted — CEI guarantees second claim panics even with mock_all_auths
+        client.claim(&account, &tok);
+    }
+    #[test]
+    fn test_claim_cei_storage_deleted_before_transfer() {
+        let (env, client)=setup();
+        let account=Address::generate(&env); let admin=Address::generate(&env);
+        let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        sac.mint(&client.address, &1000i128);
+        let key=(symbol_short!("acc_bal"), account.clone(), tok.clone());
+        env.as_contract(&client.address, || { env.storage().persistent().set(&key, &750i128); });
+        assert_eq!(client.get_claimable_balance(&account, &tok), 750i128);
+        let claimed=client.claim(&account, &tok);
+        assert_eq!(claimed, 750i128);
+        assert_eq!(client.get_claimable_balance(&account, &tok), 0i128, "CEI: storage must be 0 after claim");
+        assert_eq!(sac.balance(&account), 750i128);
+    }
+}
