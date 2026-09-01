@@ -893,6 +893,7 @@ impl SharpyContract {
         invoice.frozen = true;
         save_invoice(&env, invoice_id, &invoice);
         append_audit(&env, invoice_id, symbol_short!("freeze"), &env.current_contract_address());
+        events::invoice_updated(&env, invoice_id, &env.current_contract_address());
     }
 
     /// Unfreezes a previously frozen invoice — re-enables payments.
@@ -907,6 +908,7 @@ impl SharpyContract {
         invoice.frozen = false;
         save_invoice(&env, invoice_id, &invoice);
         append_audit(&env, invoice_id, symbol_short!("unfreeze"), &env.current_contract_address());
+        events::invoice_updated(&env, invoice_id, &env.current_contract_address());
     }
 
     /// Returns the subscription (recurring) configuration for a recurring invoice.
@@ -930,10 +932,11 @@ impl SharpyContract {
         let invoice = load_invoice(&env, invoice_id);
         assert!(invoice.creator == caller, "only creator can set notes");
 
-        let notes = InvoiceNotes { text, updated_at: env.ledger().timestamp() };
+        let notes = InvoiceNotes { text: text.clone(), updated_at: env.ledger().timestamp() };
         env.storage().persistent().set(&invoice_notes_key(invoice_id), &notes);
         env.storage().persistent().extend_ttl(&invoice_notes_key(invoice_id), 100_000, 6_307_200);
         append_audit(&env, invoice_id, symbol_short!("notes"), &caller);
+        events::invoice_updated(&env, invoice_id, &caller);
     }
 
     /// Returns the notes attached to an invoice, or None if none have been set.
