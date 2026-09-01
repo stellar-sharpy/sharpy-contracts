@@ -1,4 +1,15 @@
 //! Sharpy — Advanced split payment contract with recurring splits, escrow, and batch operations.
+//!
+//! ## Capabilities (30+)
+//! - **Invoice lifecycle:** `create_invoice`, `create_batch`, `create_recurring`, `pay`, `pool_pay`, `pay_with_tip`, `release`, `release_escrow`, `refund`, `cancel_invoice`, `freeze_invoice`/`unfreeze_invoice`
+//! - **Queries:** `get_invoice`, `get_invoice_stats`, `get_invoice_version`, `get_treasury`, `get_recurring_params`, `get_escrow_state`, `get_audit_log`, `get_payer_total`, `get_next_recurring`, `get_invoices_by_creator`, `get_invoices_by_payer`, `get_invoice_count`, `get_claimable_balance`, `claim`, `get_invoice_notes`, `set_invoice_notes`, `get_invoice_fingerprint`, `bump_invoice_ttl`, `preview_payout`
+//! - **Split rules:** `Fixed`, `Percentage` (≤100%), `Tiered` threshold — all checked arithmetic (CAP-82)
+//! - **Escrow & disputes:** `DisputeState` hold, `dispute_release`/`resolve_dispute` with arbitrator, `EscrowFchedule`
+//! - **Admin:** `initialize`, `pause`/`unpause`, `freeze`/`unfreeze`, `require!` macro, `_refund_payers` helper
+//! - **Storage:** `InvoiceNotes { text, updated_at }`, `SubscriptionParams`, `InvoiceStats`, TTL extend ~1y (CAP-78), SHA-256 fingerprint (CAP-75)
+//! - **Events:** `invoice_created`, `payment_received`, `invoice_released`, `invoice_refunded`, `invoice_cancelled`, `dispute_raised/resolved`, `escrow_funded`, `account_balance_claimed`
+//!
+//! Protocol 27 (soroban-sdk 26.1.0), `wasm32v1-none`, CEI `claim` pattern.
 
 #![no_std]
 
