@@ -734,15 +734,23 @@ impl SharpyContract {
     /// Withdraws a credited balance for an account and token.
     /// Permissionless — anyone can trigger the claim for any account.
     /// The transfer goes from the contract vault to the account.
-    /// 
+    ///
     /// # Panics
     /// - If the claimable balance is zero
     /// - If the token transfer fails (e.g., account still has no trustline)
-    /// 
-    /// # Security
-    /// - CEI pattern: storage is deleted before the transfer (defense-in-depth)
-    /// - Checked arithmetic prevents overflow (balance accumulation uses checked_add)
-    /// - Composite key (account, token) prevents collision
+    ///
+    /// # Security — CEI / reentrancy review (closes #127)
+    /// Soroban has no reentrancy: contract calls are synchronous and the host
+    /// disallows callback into the same contract during `token::transfer`. Even
+    /// so, `claim()` follows Checks-Effects-Interactions (CEI) as defense-in-depth:
+    /// 1. Checks: `balance > 0` else panic.
+    /// 2. Effects: `storage.remove(key)` deletes the claimable balance BEFORE the
+    ///    external interaction. A second `claim()` on same (account,token) will
+    ///    see 0 and panic with "no claimable balance" — no double withdrawal even
+    ///    if a future host version allowed reentrancy.
+    /// 3. Interactions: `token.transfer` is the last operation; event emitted after.
+    /// Checked arithmetic in `credit_account` and composite key `(account,token)`
+    /// further isolate balances per token.
     pub fn claim(env: Env, account: Address, token: Address) -> i128 {
         require_not_paused(&env);
         let key = account_balance_key(&account, &token);
