@@ -2861,3 +2861,55 @@ mod test_create_recurring_interval_zero {
         );
     }
 }
+
+#[cfg(test)]
+mod test_audit_log_empty {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    #[test]
+    fn test_get_audit_log_empty_on_new_invoice_and_grows() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        sac.mint(&payer, &5000i128);
+        // Use real token for pay path
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &crate::types::InvoiceOptions {
+                escrow_enabled: false,
+                escrow_release_delay: None,
+                split_rules: soroban_sdk::vec![&env],
+                auto_resolve_rules: soroban_sdk::vec![&env],
+                arbitrator: None,
+            },
+        );
+        let log0 = client.get_audit_log(&id);
+        assert_eq!(log0.len(), 0, "brand-new invoice should have empty audit log");
+        client.pay(&payer, &id, &500i128);
+        let log1 = client.get_audit_log(&id);
+        assert!(log1.len() >= 1, "audit log should grow after pay");
+    }
+}
