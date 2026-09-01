@@ -203,3 +203,22 @@ pub fn invoice_updated(env: &Env, invoice_id: u64, updater: &Address) {
         InvoiceUpdatedEvent { invoice_id, updater: updater.clone(), timestamp: env.ledger().timestamp() },
     );
 }
+
+/// Payload for the `expired` (invoice expired) event — emitted when deadline passes and refund() is called.
+/// Distinct from `refunded` to let indexers distinguish manual expiry from dispute refunds.
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceExpiredEvent {
+    pub invoice_id: u64,
+    pub deadline: u64,
+    pub funded: i128,
+}
+
+/// Emits the `expired` event. Topic: `("expired",)`.
+/// Fired in `refund()` when `timestamp > deadline` before transitioning to Refunded.
+pub fn invoice_expired(env: &Env, invoice_id: u64, deadline: u64, funded: i128) {
+    env.events().publish(
+        (symbol_short!("expired"),),
+        InvoiceExpiredEvent { invoice_id, deadline, funded },
+    );
+}
