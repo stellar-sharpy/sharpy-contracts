@@ -183,3 +183,23 @@ pub fn payment_indexed(env: &Env, payer: &Address, invoice_id: u64) {
         PaymentIndexedEvent { payer: payer.clone(), invoice_id },
     );
 }
+
+/// Payload for the `inv_upd` (invoice updated) event — emitted when mutable invoice fields are changed.
+/// Immutable fields: `creator`, `recipients`, `amounts`, `tokens`, `deadline` (commit at creation).
+/// Mutable fields: `frozen`, `notes`, `escrow_release_delay` (future), `arbitrator` (future).
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceUpdatedEvent {
+    pub invoice_id: u64,
+    pub updater: Address,
+    pub timestamp: u64,
+}
+
+/// Emits the `inv_upd` event. Topic: `("inv_upd",)`.
+/// Fired on any state-mutating invoice update (freeze/unfreeze, notes, future mutators).
+pub fn invoice_updated(env: &Env, invoice_id: u64, updater: &Address) {
+    env.events().publish(
+        (symbol_short!("inv_upd"),),
+        InvoiceUpdatedEvent { invoice_id, updater: updater.clone(), timestamp: env.ledger().timestamp() },
+    );
+}
