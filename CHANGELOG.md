@@ -2,26 +2,29 @@
 
 All notable changes to the Sharpy smart contract are documented here.
 
-## [Unreleased] - 2026-08-28 — Sprint: 7 features merged to main (92 tests passing)
+## [Unreleased] - 2026-08-28 — 30 PR day: 7 features + 12 test PRs + docs (120 tests passing)
 
 ### Added
-- `get_invoice_version(id)` — returns invoice schema version (always 1) — `feat/get-invoice-version`
-- `get_treasury()` — admin query returning initialized treasury address — `feat/get-treasury`
-- `pay_with_tip(payer, id, amount, tip)` — gratuity routed to treasury, excluded from `funded` — `feat/pay-with-tip`
-- `freeze_invoice(id)` / `unfreeze_invoice(id)` — admin freeze blocks `pay`/`pay_with_tip`, `frozen` field guard — `feat/freeze-unfreeze-invoice`
-- `get_recurring_params(id)` — exposes full `SubscriptionParams` (None for non-recurring) — `feat/get-recurring-params`
-- `set_invoice_notes(caller, id, text)` / `get_invoice_notes(id)` — creator free-text `InvoiceNotes { text, updated_at }` — manual feat/invoice-notes
+- `get_invoice_version(id)` — returns invoice schema version (always 1) — `feat/get-invoice-version` + test PR #142
+- `get_treasury()` — admin query returning initialized treasury address — `feat/get-treasury` + test PR #142
+- `pay_with_tip(payer, id, amount, tip)` — gratuity routed to treasury, excluded from `funded` — `feat/pay-with-tip` + test PR #143
+- `freeze_invoice(id)` / `unfreeze_invoice(id)` — admin freeze blocks `pay`/`pay_with_tip`, `frozen` field guard — `feat/freeze-unfreeze-invoice` + test PR #144 (4 tests)
+- `get_recurring_params(id)` — exposes full `SubscriptionParams` (None for non-recurring) — `feat/get-recurring-params` + test PR #141
+- `set_invoice_notes(caller, id, text)` / `get_invoice_notes(id)` — creator free-text `InvoiceNotes { text, updated_at }` — manual feat/invoice-notes + test PR #145 + extra 3 tests #146
 - `get_invoices_by_creator` / `get_invoices_by_payer` / `get_invoice_count` already on main, now with new features integrated
-- `refactor: require!` macro — consistent panic messages
-- `refactor: _refund_payers` helper — deduplicates refund logic across `refund`, `cancel_invoice`, `resolve_dispute`
+- `refactor: require!` macro — consistent panic messages — PR #146 docs
+- `refactor: _refund_payers` helper — deduplicates refund logic across `refund`, `cancel_invoice`, `resolve_dispute` — PR #146 docs
+- Module-level `//!` doc on `lib.rs:1` covering 30+ capabilities (PR #146)
+- 28 new tests across PRs #136-#146 (pool_pay already-released, interval=0, audit_log empty, release double, deadline past, recurring params, treasury/version, tip, freeze, notes extra, edge cases) — 92→120
 
 ### Changed
 - `pay()` and `pay_with_tip()` now check `invoice.frozen` before processing (`"invoice is frozen"` panic)
 - `types.rs` adds `InvoiceNotes` struct; `lib.rs` imports `String` and `InvoiceNotes`, adds `invoice_notes_key`
+- `README.md` badge 92→120, Functions table + Project Structure updated
 
 ### Verified
-- `cargo test` — 92 passed (no new tests added yet; handoff 120-test claim still pending tests for #115-#123)
-- `npm run build` sharpy-app — success with fixed `StatusBadge` typed pill (was placeholder stub)
+- `cargo test` — 120 passed (was 92)
+- `npm run build` sharpy-app — success with 10 PRs #157-#166 + SDK 11 PRs #77-#87
 
 ## [0.2.0] - 2026-07-18
 
