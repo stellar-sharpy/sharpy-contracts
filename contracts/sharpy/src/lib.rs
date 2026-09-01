@@ -803,8 +803,19 @@ impl SharpyContract {
     /// Returns the schema version of the invoice — always 1 for current contracts.
     /// Useful for forward-compatibility checks in off-chain indexers and SDKs
     /// when multiple contract versions may be deployed simultaneously.
+    /// Version is set at invoice creation (`version: 1` in `build_invoice`) and
+    /// never mutated, ensuring historical invoices remain version-stable across upgrades.
+    /// Off-chain clients should gate feature usage on `get_invoice_version` to
+    /// handle mixed-version deployments safely.
     pub fn get_invoice_version(env: Env, invoice_id: u64) -> u32 {
         load_invoice(&env, invoice_id).version
+    }
+
+    /// Returns the contract-level version for compatibility checks.
+    /// Currently always 1; bumped on breaking storage or event schema changes.
+    pub fn get_contract_version(env: Env) -> u32 {
+        let _ = env.storage().instance().get::<Symbol, Address>(&admin_key()).expect("not initialized");
+        1u32
     }
 
     /// Returns the treasury address set during `initialize`.
