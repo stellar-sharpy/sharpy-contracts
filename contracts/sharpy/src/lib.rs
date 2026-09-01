@@ -291,7 +291,10 @@ impl SharpyContract {
         assert!(!invoice.frozen, "invoice is frozen");
 
         let total: i128 = invoice.amounts.iter().sum();
-        assert!(amount <= total - invoice.funded, "payment exceeds remaining balance");
+        let remaining = total - invoice.funded;
+        if amount > remaining {
+            panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", amount, remaining);
+        }
 
         let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
         token_client.transfer(&payer, &env.current_contract_address(), &amount);
@@ -329,7 +332,10 @@ impl SharpyContract {
             assert!(inv.status == InvoiceStatus::Pending, "invoice is not pending");
             assert!(p.amount > 0, "payment amount must be positive");
             let inv_total: i128 = inv.amounts.iter().sum();
-            assert!(inv.funded + p.amount <= inv_total, "payment exceeds remaining balance");
+            let remaining = inv_total - inv.funded;
+            if inv.funded + p.amount > inv_total {
+                panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", p.amount, remaining);
+            }
             let token = inv.tokens.get(0).expect("no token");
             let prev = token_totals.get(token.clone()).unwrap_or(0);
             token_totals.set(token, prev + p.amount);
@@ -819,7 +825,10 @@ impl SharpyContract {
         assert!(!invoice.frozen, "invoice is frozen");
 
         let total: i128 = invoice.amounts.iter().sum();
-        assert!(amount <= total - invoice.funded, "payment exceeds remaining balance");
+        let remaining = total - invoice.funded;
+        if amount > remaining {
+            panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", amount, remaining);
+        }
 
         let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
 
