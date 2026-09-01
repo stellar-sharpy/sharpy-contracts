@@ -3098,3 +3098,29 @@ mod test_freeze_unfreeze {
         assert_eq!(client.get_invoice(&id).funded, 100i128);
     }
 }
+
+#[cfg(test)]
+mod test_invoice_notes {
+    use soroban_sdk::{testutils::Address as _, Address, Env, String};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_set_and_get_notes() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        assert!(client.get_invoice_notes(&id).is_none());
+        client.set_invoice_notes(&creator, &id, &String::from_str(&env, "first note"));
+        let notes=client.get_invoice_notes(&id).unwrap(); assert_eq!(notes.text, String::from_str(&env, "first note"));
+        client.set_invoice_notes(&creator, &id, &String::from_str(&env, "updated"));
+        assert_eq!(client.get_invoice_notes(&id).unwrap().text, String::from_str(&env, "updated"));
+    }
+    #[test]
+    #[should_panic(expected = "only creator can set notes")]
+    fn test_set_notes_non_creator_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let stranger=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.set_invoice_notes(&stranger, &id, &String::from_str(&env, "hack"));
+    }
+}
