@@ -165,3 +165,21 @@ pub fn escrow_funded(env: &Env, invoice_id: u64, release_at: u64, funded: i128) 
         EscrowFundedEvent { invoice_id, release_at, funded },
     );
 }
+
+/// Payload for the `pymt_idx` (payment indexed) event — emitted when a payer is added to the payer index.
+/// Allows indexers to subscribe to payer index changes without polling `get_invoices_by_payer`.
+#[contracttype]
+#[derive(Clone)]
+pub struct PaymentIndexedEvent {
+    pub payer: Address,
+    pub invoice_id: u64,
+}
+
+/// Emits the `pymt_idx` event. Topic: `("pymt_idx",)`.
+/// Fired when `index_invoice_for_payer` adds a new invoice_id for a payer (deduplicated).
+pub fn payment_indexed(env: &Env, payer: &Address, invoice_id: u64) {
+    env.events().publish(
+        (symbol_short!("pymt_idx"),),
+        PaymentIndexedEvent { payer: payer.clone(), invoice_id },
+    );
+}

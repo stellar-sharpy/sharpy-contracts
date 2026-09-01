@@ -105,6 +105,7 @@ fn index_invoice_for_payer(env: &Env, payer: &Address, invoice_id: u64) {
         ids.push_back(invoice_id);
         env.storage().persistent().set(&key, &ids);
         env.storage().persistent().extend_ttl(&key, 100_000, 6_307_200);
+        events::payment_indexed(env, payer, invoice_id);
     }
 }
 
