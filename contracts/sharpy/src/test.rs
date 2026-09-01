@@ -3050,3 +3050,51 @@ mod test_pay_with_tip {
         assert!(client.get_invoices_by_payer(&payer).contains(&id));
     }
 }
+
+#[cfg(test)]
+mod test_freeze_unfreeze {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    #[should_panic(expected = "invoice is frozen")]
+    fn test_pay_when_frozen_panics() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.freeze_invoice(&id);
+        client.pay(&payer, &id, &100i128);
+    }
+    #[test]
+    #[should_panic(expected = "invoice is already frozen")]
+    fn test_double_freeze_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.freeze_invoice(&id); client.freeze_invoice(&id);
+    }
+    #[test]
+    #[should_panic(expected = "invoice is not frozen")]
+    fn test_unfreeze_not_frozen_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.unfreeze_invoice(&id);
+    }
+    #[test]
+    fn test_freeze_blocks_and_unfreeze_restores() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.freeze_invoice(&id);
+        client.unfreeze_invoice(&id);
+        client.pay(&payer, &id, &100i128);
+        assert_eq!(client.get_invoice(&id).funded, 100i128);
+    }
+}
