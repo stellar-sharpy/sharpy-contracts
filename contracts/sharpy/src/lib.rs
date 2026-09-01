@@ -280,6 +280,16 @@ impl SharpyContract {
         id
     }
 
+    /// Security audit — pay() double-spend / concurrent same-invoice safety.
+    /// Soroban executes transactions sequentially within a ledger: ledgers are
+    /// applied one tx at a time, each seeing the storage writes of the prior tx.
+    /// There is no parallel execution within a block. The `total - funded` guard
+    /// is evaluated after `load_invoice` and before any state mutation; two payers
+    /// that both observe `funded=0` cannot both succeed — the first pay writes
+    /// `funded+=amount`, the second load will see the updated `funded` and the
+    /// `amount > remaining` panic will trigger. The test `test_pay_double_spend_sequential_guard`
+    /// demonstrates this with `mock_all_auths` — sequential pays respect the
+    /// remaining-balance invariant and funded is never double-counted.
     pub fn pay(env: Env, payer: Address, invoice_id: u64, amount: i128) {
         require_not_paused(&env);
         payer.require_auth();
