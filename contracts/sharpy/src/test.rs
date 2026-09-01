@@ -2825,3 +2825,39 @@ mod test_pool_pay_already_funded {
         assert_eq!(inv_final.status, InvoiceStatus::Released);
     }
 }
+
+#[cfg(test)]
+mod test_create_recurring_interval_zero {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    #[test]
+    #[should_panic(expected = "recurrence_interval must be positive")]
+    fn test_create_recurring_interval_zero_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        client.create_recurring(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &0u64,
+            &3u32,
+        );
+    }
+}
