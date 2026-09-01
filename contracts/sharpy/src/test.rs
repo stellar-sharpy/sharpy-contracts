@@ -3027,3 +3027,26 @@ mod test_treasury_version {
         assert_eq!(client.get_invoice_version(&id), 1u32);
     }
 }
+
+#[cfg(test)]
+mod test_pay_with_tip {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>, Address) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t.clone()); (env,c,t) }
+    #[test]
+    fn test_pay_with_tip_routing() {
+        let (env, client, treasury)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient.clone()], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        let bal_before_treasury=sac.balance(&treasury);
+        client.pay_with_tip(&payer, &id, &600i128, &100i128);
+        let inv=client.get_invoice(&id); assert_eq!(inv.funded, 600i128, "funded excludes tip");
+        assert_eq!(sac.balance(&treasury), bal_before_treasury+100i128);
+        client.pay_with_tip(&payer, &id, &400i128, &0i128);
+        let inv2=client.get_invoice(&id); assert_eq!(inv2.funded, 1000i128);
+        assert!(client.get_invoices_by_payer(&payer).contains(&id));
+    }
+}
