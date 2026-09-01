@@ -3330,6 +3330,58 @@ mod test_full_recurring_chain {
 }
 
 #[cfg(test)]
+mod test_pay_double_spend_audit {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    #[should_panic(expected = "invoice is not pending")]
+    fn test_pay_double_spend_sequential_guard() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env);
+        let payer1=Address::generate(&env); let payer2=Address::generate(&env);
+        sac.mint(&payer1, &2000i128); sac.mint(&payer2, &2000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.pay(&payer1, &id, &1000i128);
+        assert_eq!(client.get_invoice(&id).funded, 1000i128);
+        // second pay on released invoice must panic — Soroban txs are sequential, funded not double-counted
+        client.pay(&payer2, &id, &1000i128);
+    }
+    #[test]
+    #[should_panic(expected = "payment exceeds remaining balance")]
+    fn test_pay_overpayment_panics_even_partial() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.pay(&payer, &id, &600i128);
+        assert_eq!(client.get_invoice(&id).funded, 600i128);
+        // remaining is 400, paying 500 must panic with clear message containing remaining balance
+        client.pay(&payer, &id, &500i128);
+    }
+    #[test]
+    fn test_pay_sequential_funded_not_double_counted() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 2000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.pay(&payer, &id, &1000i128);
+        client.pay(&payer, &id, &500i128);
+        assert_eq!(client.get_invoice(&id).funded, 1500i128, "funded must be sum of sequential pays, not double-counted");
+        assert_eq!(client.get_payer_total(&id, &payer), 1500i128);
+    }
+}
+
+#[cfg(test)]
 mod test_remaining_for_120 {
     use soroban_sdk::{testutils::Address as _, Address, Env};
     use crate::SharpyContractClient;
