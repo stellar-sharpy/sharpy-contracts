@@ -3289,6 +3289,47 @@ mod test_pool_pay_three_tokens {
 }
 
 #[cfg(test)]
+mod test_full_recurring_chain {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::InvoiceStatus, SharpyContractClient};
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_full_three_invoice_recurring_chain() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &10000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let interval=7*86400u64;
+        let id1=client.create_recurring(&creator, &soroban_sdk::vec![&env, recipient.clone()], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &interval, &3u32);
+        // pay & release invoice 1 -> spawns invoice 2
+        client.pay(&payer, &id1, &1000i128);
+        assert_eq!(client.get_invoice(&id1).status, InvoiceStatus::Released);
+        let id2=client.get_next_recurring(&id1).expect("invoice 2 should exist");
+        assert!(id2 != id1);
+        let inv2=client.get_invoice(&id2);
+        assert_eq!(inv2.status, InvoiceStatus::Pending);
+        assert_eq!(inv2.amounts.get(0).unwrap(), 1000i128);
+        assert_eq!(inv2.deadline, env.ledger().timestamp()+interval);
+        // pay & release invoice 2 -> spawns invoice 3
+        client.pay(&payer, &id2, &1000i128);
+        let id3=client.get_next_recurring(&id2).expect("invoice 3 should exist");
+        assert_eq!(client.get_invoice(&id3).status, InvoiceStatus::Pending);
+        // pay & release invoice 3 -> no further invoice (max=3)
+        client.pay(&payer, &id3, &1000i128);
+        assert_eq!(client.get_invoice(&id3).status, InvoiceStatus::Released);
+        assert!(client.get_next_recurring(&id3).is_none(), "max_recurrences=3 should stop after 3");
+        assert_eq!(client.get_invoice_count(), 3u64);
+        // verify recurring params num_created chain
+        assert_eq!(client.get_recurring_params(&id1).unwrap().num_created, 1u32);
+        assert_eq!(client.get_recurring_params(&id2).unwrap().num_created, 2u32);
+        assert_eq!(client.get_recurring_params(&id3).unwrap().num_created, 3u32);
+    }
+}
+
+#[cfg(test)]
 mod test_remaining_for_120 {
     use soroban_sdk::{testutils::Address as _, Address, Env};
     use crate::SharpyContractClient;
