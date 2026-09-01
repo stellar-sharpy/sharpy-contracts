@@ -2,7 +2,7 @@
 
 ![Soroban](https://img.shields.io/badge/Soroban-Protocol%2027-6C63FF?logo=stellar)
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
-![Tests](https://img.shields.io/badge/tests-120%20passing-00D4AA)
+![Tests](https://img.shields.io/badge/tests-129%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-0.2.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
@@ -160,7 +160,7 @@ sharpy-contracts/
 │       ├── lib.rs                   # All contract logic (600+ lines)
 │       ├── types.rs                 # Invoice, SplitRule, AuditEntry, etc.
 │       ├── events.rs                # Structured event helpers
-│       └── test.rs                  # 120 unit tests (+7 features + 12 test PRs 2026-08-28)
+│       └── test.rs                  # 129 unit tests (+7 features + 12 test PRs 2026-08-28)
 └── .github/
     ├── workflows/ci.yml             # Test + WASM build on every PR
     └── ISSUE_TEMPLATE/              # Bug report, feature request
@@ -171,7 +171,7 @@ sharpy-contracts/
 ## Build & Test
 
 ```bash
-make test           # cargo test (120 passing)
+make test           # cargo test (129 passing)
 make build          # build WASM
 make optimize       # optimize WASM with stellar contract optimize
 make deploy-testnet # deploy to testnet
