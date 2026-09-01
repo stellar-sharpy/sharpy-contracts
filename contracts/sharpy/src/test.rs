@@ -3250,6 +3250,45 @@ mod test_final_edge_cases_for_120 {
 }
 
 #[cfg(test)]
+mod test_pool_pay_three_tokens {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::{InvoiceOptions, InvoicePayment}, SharpyContractClient};
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_pool_pay_three_different_tokens() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env);
+        let tok_a=env.register_stellar_asset_contract(admin.clone());
+        let tok_b=env.register_stellar_asset_contract(admin.clone());
+        let tok_c=env.register_stellar_asset_contract(admin.clone());
+        let creator=Address::generate(&env); let payer=Address::generate(&env);
+        let r1=Address::generate(&env); let r2=Address::generate(&env); let r3=Address::generate(&env);
+        let sac_a=token::StellarAssetClient::new(&env,&tok_a);
+        let sac_b=token::StellarAssetClient::new(&env,&tok_b);
+        let sac_c=token::StellarAssetClient::new(&env,&tok_c);
+        sac_a.mint(&payer, &5000i128); sac_b.mint(&payer, &5000i128); sac_c.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let opts=InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None};
+        let id1=client.create_invoice(&creator, &soroban_sdk::vec![&env, r1], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok_a.clone()], &deadline, &opts);
+        let id2=client.create_invoice(&creator, &soroban_sdk::vec![&env, r2], &soroban_sdk::vec![&env, 2000i128], &soroban_sdk::vec![&env, tok_b.clone()], &deadline, &opts);
+        let id3=client.create_invoice(&creator, &soroban_sdk::vec![&env, r3], &soroban_sdk::vec![&env, 3000i128], &soroban_sdk::vec![&env, tok_c.clone()], &deadline, &opts);
+        let payments=soroban_sdk::vec![&env, InvoicePayment{invoice_id:id1, amount:1000i128}, InvoicePayment{invoice_id:id2, amount:2000i128}, InvoicePayment{invoice_id:id3, amount:3000i128}];
+        client.pool_pay(&payer, &payments);
+        assert_eq!(client.get_invoice(&id1).funded, 1000i128);
+        assert_eq!(client.get_invoice(&id2).funded, 2000i128);
+        assert_eq!(client.get_invoice(&id3).funded, 3000i128);
+        // each token total transferred correctly — balances reflect deductions
+        assert_eq!(sac_a.balance(&payer), 4000i128);
+        assert_eq!(sac_b.balance(&payer), 3000i128);
+        assert_eq!(sac_c.balance(&payer), 2000i128);
+        // payer index contains all three
+        let payer_invoices=client.get_invoices_by_payer(&payer);
+        assert!(payer_invoices.contains(&id1)); assert!(payer_invoices.contains(&id2)); assert!(payer_invoices.contains(&id3));
+    }
+}
+
+#[cfg(test)]
 mod test_remaining_for_120 {
     use soroban_sdk::{testutils::Address as _, Address, Env};
     use crate::SharpyContractClient;
