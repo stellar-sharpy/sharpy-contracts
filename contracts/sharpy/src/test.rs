@@ -2732,3 +2732,96 @@ mod test_final_validation_coverage {
         assert_eq!(balance, 0i128, "unknown account should have 0 claimable balance");
     }
 }
+
+#[cfg(test)]
+mod test_pool_pay_already_funded {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{
+        types::{InvoiceOptions, InvoicePayment, InvoiceStatus},
+        SharpyContractClient,
+    };
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    fn no_rules(env: &Env) -> InvoiceOptions {
+        InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: soroban_sdk::vec![env],
+            auto_resolve_rules: soroban_sdk::vec![env],
+            arbitrator: None,
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "invoice is not pending")]
+    fn test_pool_pay_on_already_released_panics() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &no_rules(&env),
+        );
+        // Fully fund via pay -> invoice becomes Released
+        client.pay(&payer, &id, &1000i128);
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.status, InvoiceStatus::Released);
+        // pool_pay on released invoice should panic
+        let payments = soroban_sdk::vec![&env, InvoicePayment { invoice_id: id, amount: 100i128 }];
+        client.pool_pay(&payer, &payments);
+    }
+
+    #[test]
+    fn test_pool_pay_partial_then_full_via_two_calls() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 2000i128],
+            &soroban_sdk::vec![&env, tok],
+            &deadline,
+            &no_rules(&env),
+        );
+        // First pool_pay partial
+        let p1 = soroban_sdk::vec![&env, InvoicePayment { invoice_id: id, amount: 800i128 }];
+        client.pool_pay(&payer, &p1);
+        let inv_mid = client.get_invoice(&id);
+        assert_eq!(inv_mid.funded, 800i128);
+        assert_eq!(inv_mid.status, InvoiceStatus::Pending);
+        // Second pool_pay completes
+        let p2 = soroban_sdk::vec![&env, InvoicePayment { invoice_id: id, amount: 1200i128 }];
+        client.pool_pay(&payer, &p2);
+        let inv_final = client.get_invoice(&id);
+        assert_eq!(inv_final.funded, 2000i128);
+        assert_eq!(inv_final.status, InvoiceStatus::Released);
+    }
+}
