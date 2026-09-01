@@ -3012,3 +3012,18 @@ mod test_get_recurring_params {
         assert!(client.get_recurring_params(&id2).is_none());
     }
 }
+
+#[cfg(test)]
+mod test_treasury_version {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>, Address) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t.clone()); (env,c,t) }
+    #[test]
+    fn test_get_treasury_and_version() {
+        let (env, client, treasury)=setup();
+        assert_eq!(client.get_treasury(), treasury);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        assert_eq!(client.get_invoice_version(&id), 1u32);
+    }
+}
