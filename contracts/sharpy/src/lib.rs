@@ -553,6 +553,9 @@ impl SharpyContract {
 
         Self::_refund_payers(&env, invoice_id, &invoice);
 
+        // Emit distinct expiry notification before status change — lets indexers separate deadline expiry from dispute refunds
+        events::invoice_expired(&env, invoice_id, invoice.deadline, invoice.funded);
+
         invoice.status = InvoiceStatus::Refunded;
         invoice.completion_time = Some(env.ledger().timestamp());
         save_invoice(&env, invoice_id, &invoice);
