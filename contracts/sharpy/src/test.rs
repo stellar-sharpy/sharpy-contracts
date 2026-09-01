@@ -2996,3 +2996,19 @@ mod test_pay_after_deadline {
         client.pay(&payer, &id, &100i128);
     }
 }
+
+#[cfg(test)]
+mod test_get_recurring_params {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let id=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&id); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_get_recurring_params_returns_config_and_none() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_recurring(&creator, &soroban_sdk::vec![&env, recipient.clone()], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, token.clone()], &deadline, &86400u64, &3u32);
+        let params=client.get_recurring_params(&id).unwrap(); assert_eq!(params.max_recurrences,3u32); assert_eq!(params.recurrence_interval,86400u64);
+        let id2=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 500i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        assert!(client.get_recurring_params(&id2).is_none());
+    }
+}
