@@ -1108,6 +1108,21 @@ impl SharpyContract {
     pub fn is_recurring_paused(env: Env, invoice_id: u64) -> bool {
         env.storage().persistent().get::<(Symbol,u64), RecurringPauseState>(&recurring_pause_key(invoice_id)).map(|s| s.paused).unwrap_or(false)
     }
+
+    pub fn create_template(env: Env, creator: Address, name: String, recipients: Vec<Address>, amounts: Vec<i128>) -> u64 {
+        creator.require_auth();
+        assert!(!recipients.is_empty(), "recipients empty");
+        assert_eq!(recipients.len(), amounts.len(), "length mismatch");
+        let ctr: u64 = env.storage().persistent().get(&template_counter_key()).unwrap_or(0) + 1;
+        env.storage().persistent().set(&template_counter_key(), &ctr);
+        let tmpl = InvoiceTemplate { name: name.clone(), recipients: recipients.clone(), amounts: amounts.clone(), template_id: ctr };
+        env.storage().persistent().set(&template_key(ctr), &tmpl);
+        events::template_created(&env, ctr, &creator);
+        ctr
+    }
+    pub fn get_template(env: Env, template_id: u64) -> Option<InvoiceTemplate> {
+        env.storage().persistent().get(&template_key(template_id))
+    }
 }
 
 /// Validates that a token address is not the zero address.
