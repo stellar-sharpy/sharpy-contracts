@@ -3,6 +3,7 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
+- feat: deadline extension — extend_deadline for creators — Adds extend_deadline(caller, id, new_deadline) allowing crea
 - feat: batch refund — refund_batch for multiple invoices — Adds refund_batch(caller, ids) to refund multiple deadline-p
 - `set_invoice_memo_ext`/`get_invoice_memo_ext` — InvoiceExtraMemo (256 chars) — feat/invoice-memo-ext (138 tests)
  - 2026-08-28 — 30 PR day: 7 features + 12 test PRs + docs (120 tests passing)

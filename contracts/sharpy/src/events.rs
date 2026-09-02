@@ -251,3 +251,16 @@ pub struct InvoiceMemoExtUpdatedEvent {
 pub fn invoice_memo_ext_updated(env: &Env, invoice_id: u64, updater: &Address) {
     env.events().publish((symbol_short!("memo"),), InvoiceMemoExtUpdatedEvent { invoice_id, updater: updater.clone() });
 }
+
+/// Payload for deadline extension event.
+#[contracttype]
+#[derive(Clone)]
+pub struct DeadlineExtendedEvent {
+    pub invoice_id: u64,
+    pub old_deadline: u64,
+    pub new_deadline: u64,
+}
+/// Emits deadline extended event.
+pub fn deadline_extended(env: &Env, invoice_id: u64, old_deadline: u64, new_deadline: u64) {
+    env.events().publish((symbol_short!("ext_dead"),), DeadlineExtendedEvent { invoice_id, old_deadline, new_deadline });
+}
