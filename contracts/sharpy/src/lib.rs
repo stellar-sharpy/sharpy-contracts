@@ -986,6 +986,25 @@ impl SharpyContract {
     pub fn get_invoice_tags(env: Env, invoice_id: u64) -> Option<InvoiceTags> {
         env.storage().persistent().get(&invoice_tags_key(invoice_id))
     }
+
+    /// Set extra memo on an invoice — creator only, max 256 chars.
+    pub fn set_invoice_memo_ext(env: Env, caller: Address, invoice_id: u64, memo: String) {
+        require_not_paused(&env);
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set memo");
+        assert!(memo.len() <= 256, "memo too long: max 256 chars");
+        let stored = InvoiceExtraMemo { memo: memo.clone(), updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&invoice_memo_ext_key(invoice_id), &stored);
+        env.storage().persistent().extend_ttl(&invoice_memo_ext_key(invoice_id), 100_000, 6_307_200);
+        append_audit(&env, invoice_id, symbol_short!("memo"), &caller);
+        events::invoice_memo_ext_updated(&env, invoice_id, &caller);
+        events::invoice_updated(&env, invoice_id, &caller);
+    }
+    /// Get extra memo for an invoice, or None.
+    pub fn get_invoice_memo_ext(env: Env, invoice_id: u64) -> Option<InvoiceExtraMemo> {
+        env.storage().persistent().get(&invoice_memo_ext_key(invoice_id))
+    }
 }
 
 /// Validates that a token address is not the zero address.
