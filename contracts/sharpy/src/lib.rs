@@ -1030,6 +1030,23 @@ impl SharpyContract {
         }
         count
     }
+
+    /// Extend invoice deadline — creator only, only Pending, new_deadline must be > old and > now.
+    pub fn extend_deadline(env: Env, caller: Address, invoice_id: u64, new_deadline: u64) {
+        require_not_paused(&env);
+        caller.require_auth();
+        let mut invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can extend deadline");
+        assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
+        assert!(new_deadline > invoice.deadline, "new deadline must be later");
+        assert!(new_deadline > env.ledger().timestamp(), "new deadline must be in future");
+        let old = invoice.deadline;
+        invoice.deadline = new_deadline;
+        save_invoice(&env, invoice_id, &invoice);
+        append_audit(&env, invoice_id, symbol_short!("ext_dead"), &caller);
+        events::deadline_extended(&env, invoice_id, old, new_deadline);
+        events::invoice_updated(&env, invoice_id, &caller);
+    }
 }
 
 /// Validates that a token address is not the zero address.
