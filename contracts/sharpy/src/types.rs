@@ -298,3 +298,8 @@ pub struct ApprovalState {
     pub approvers: soroban_sdk::Vec<Address>,
     pub required: u32,
 }
+
+/// Archival marker for invoices.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ArchivalState { pub archived: bool, pub at: u64 }
