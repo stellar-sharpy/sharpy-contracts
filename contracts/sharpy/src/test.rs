@@ -3614,3 +3614,33 @@ mod test_batch_refund {
     }
 }
 
+#[cfg(test)]
+mod test_extend_deadline {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    fn no_rules(env: &Env) -> crate::types::InvoiceOptions { crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:Vec::new(env), auto_resolve_rules:Vec::new(env), arbitrator:None} }
+    #[test] fn test_extend_deadline_success() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+100;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let new_dl=deadline+1000; client.extend_deadline(&creator, &id, &new_dl); assert_eq!(client.get_invoice(&id).deadline, new_dl);
+    }
+    #[test] #[should_panic(expected="only creator can extend deadline")] fn test_extend_non_creator_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let stranger=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+100;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        client.extend_deadline(&stranger, &id, &(deadline+1000));
+    }
+    #[test] #[should_panic(expected="new deadline must be later")] fn test_extend_earlier_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+1000;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        client.extend_deadline(&creator, &id, &(deadline-10));
+    }
+    #[test] fn test_extend_deadline_audit() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+100;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        client.extend_deadline(&creator, &id, &(deadline+500));
+        let log=client.get_audit_log(&id); assert!(log.iter().any(|e| e.action==soroban_sdk::symbol_short!("ext_dead")));
+    }
+}
+
