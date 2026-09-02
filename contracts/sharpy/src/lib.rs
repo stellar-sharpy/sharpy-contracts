@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, SplitRule,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, SplitRule,
     SubscriptionParams,
 };
 
@@ -42,6 +42,7 @@ fn account_balance_key(account: &Address, token: &Address) -> (Symbol, Address, 
 }
 fn invoice_notes_key(id: u64) -> (Symbol, u64) { (symbol_short!("notes"), id) }
 fn invoice_tags_key(id: u64) -> (Symbol, u64) { (symbol_short!("itags"), id) }
+fn recurring_pause_key(id: u64) -> (Symbol, u64) { (symbol_short!("rpause"), id) }
 fn discount_key(id: u64) -> (Symbol, u64) { (symbol_short!("disc"), id) }
 fn invoice_metadata_key(id: u64) -> (Symbol, u64) { (symbol_short!("imeta"), id) }
 fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id) }
@@ -1079,6 +1080,32 @@ impl SharpyContract {
     }
     pub fn get_discount(env: Env, invoice_id: u64) -> Option<DiscountConfig> {
         env.storage().persistent().get(&discount_key(invoice_id))
+    }
+
+    pub fn pause_recurring(env: Env, caller: Address, invoice_id: u64) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can pause recurring");
+        let params: SubscriptionParams = env.storage().persistent().get(&recurring_params_key(invoice_id)).expect("not recurring");
+        let _ = params;
+        let state = RecurringPauseState { paused: true, updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&recurring_pause_key(invoice_id), &state);
+        append_audit(&env, invoice_id, symbol_short!("rpause"), &caller);
+        events::recurring_paused(&env, invoice_id, true);
+    }
+    pub fn resume_recurring(env: Env, caller: Address, invoice_id: u64) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can resume recurring");
+        let state: RecurringPauseState = env.storage().persistent().get(&recurring_pause_key(invoice_id)).expect("not paused");
+        assert!(state.paused, "not paused");
+        let new_state = RecurringPauseState { paused: false, updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&recurring_pause_key(invoice_id), &new_state);
+        append_audit(&env, invoice_id, symbol_short!("resume"), &caller);
+        events::recurring_paused(&env, invoice_id, false);
+    }
+    pub fn is_recurring_paused(env: Env, invoice_id: u64) -> bool {
+        env.storage().persistent().get::<(Symbol,u64), RecurringPauseState>(&recurring_pause_key(invoice_id)).map(|s| s.paused).unwrap_or(false)
     }
 }
 

@@ -3,6 +3,7 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
+- feat: recurring pause — pause/resume recurring chain — Adds pause_recurring / resume_recurring and is_recurring_pau
 - feat: discount config — set/get_discount — feat/discount-config
 - feat: invoice metadata — set/get_invoice_metadata — Adds InvoiceMetadata (key-value map) via set/get with creato
 - feat: deadline extension — extend_deadline for creators — Adds extend_deadline(caller, id, new_deadline) allowing crea

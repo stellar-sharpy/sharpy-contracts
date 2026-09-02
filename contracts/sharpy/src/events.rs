@@ -279,3 +279,10 @@ pub struct DiscountUpdatedEvent { pub invoice_id: u64, pub discount_bps: u32 }
 pub fn discount_updated(env: &Env, invoice_id: u64, discount_bps: u32) {
     env.events().publish((symbol_short!("disc"),), DiscountUpdatedEvent { invoice_id, discount_bps });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct RecurringPausedEvent { pub invoice_id: u64, pub paused: bool }
+pub fn recurring_paused(env: &Env, invoice_id: u64, paused: bool) {
+    env.events().publish((symbol_short!("rpause"),), RecurringPausedEvent { invoice_id, paused });
+}
