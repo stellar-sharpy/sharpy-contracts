@@ -40,6 +40,10 @@ Recent testnet transactions demonstrating all features:
 
 ---
 
+## Internal architecture
+
+Contributor-oriented storage keys, state machines, and events: [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Architecture
 
 ```mermaid
