@@ -232,3 +232,15 @@ pub struct InvoiceMemo {
     /// Ledger timestamp when the memo was created.
     pub created_at: u64,
 }
+
+/// Tags attached to an invoice for categorization and search.
+/// Stored per-invoice via `set_invoice_tags` / `get_invoice_tags`.
+/// Max 10 tags, each up to 32 chars — enforced at contract level.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceTags {
+    /// Ordered list of tags (e.g. ["freelance", "design", "urgent"]).
+    pub tags: soroban_sdk::Vec<soroban_sdk::String>,
+    /// Ledger timestamp when tags were last updated.
+    pub updated_at: u64,
+}
