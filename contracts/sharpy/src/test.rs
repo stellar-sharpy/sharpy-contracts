@@ -3540,3 +3540,38 @@ mod test_invoice_tags {
         assert!(t2 > t1);
     }
 }
+
+#[cfg(test)]
+mod test_invoice_memo_ext {
+    use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec};
+    use soroban_sdk::symbol_short;
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    fn no_rules(env: &Env) -> crate::types::InvoiceOptions { crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:Vec::new(env), auto_resolve_rules:Vec::new(env), arbitrator:None} }
+    #[test] fn test_memo_set_get() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        assert!(client.get_invoice_memo_ext(&id).is_none());
+        client.set_invoice_memo_ext(&creator, &id, &String::from_str(&env, "hello memo"));
+        let m=client.get_invoice_memo_ext(&id).unwrap(); assert_eq!(m.memo, String::from_str(&env, "hello memo"));
+        let log=client.get_audit_log(&id); assert!(log.iter().any(|e| e.action==symbol_short!("memo")));
+    }
+    #[test] #[should_panic(expected="only creator can set memo")] fn test_memo_non_creator_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let stranger=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        client.set_invoice_memo_ext(&stranger, &id, &String::from_str(&env, "hack"));
+    }
+    #[test] fn test_memo_isolated() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id1=client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token.clone()]), &deadline, &no_rules(&env));
+        let id2=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        client.set_invoice_memo_ext(&creator, &id1, &String::from_str(&env, "only1"));
+        assert!(client.get_invoice_memo_ext(&id2).is_none());
+    }
+    #[test] #[should_panic(expected="memo too long")] fn test_memo_too_long_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let long = String::from_str(&env, &"x".repeat(257)); client.set_invoice_memo_ext(&creator, &id, &long);
+    }
+}
+
