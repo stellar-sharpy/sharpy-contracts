@@ -1081,6 +1081,32 @@ impl SharpyContract {
     pub fn get_discount(env: Env, invoice_id: u64) -> Option<DiscountConfig> {
         env.storage().persistent().get(&discount_key(invoice_id))
     }
+
+    pub fn pause_recurring(env: Env, caller: Address, invoice_id: u64) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can pause recurring");
+        let params: SubscriptionParams = env.storage().persistent().get(&recurring_params_key(invoice_id)).expect("not recurring");
+        let _ = params;
+        let state = RecurringPauseState { paused: true, updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&recurring_pause_key(invoice_id), &state);
+        append_audit(&env, invoice_id, symbol_short!("rpause"), &caller);
+        events::recurring_paused(&env, invoice_id, true);
+    }
+    pub fn resume_recurring(env: Env, caller: Address, invoice_id: u64) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can resume recurring");
+        let state: RecurringPauseState = env.storage().persistent().get(&recurring_pause_key(invoice_id)).expect("not paused");
+        assert!(state.paused, "not paused");
+        let new_state = RecurringPauseState { paused: false, updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&recurring_pause_key(invoice_id), &new_state);
+        append_audit(&env, invoice_id, symbol_short!("resume"), &caller);
+        events::recurring_paused(&env, invoice_id, false);
+    }
+    pub fn is_recurring_paused(env: Env, invoice_id: u64) -> bool {
+        env.storage().persistent().get::<(Symbol,u64), RecurringPauseState>(&recurring_pause_key(invoice_id)).map(|s| s.paused).unwrap_or(false)
+    }
 }
 
 /// Validates that a token address is not the zero address.
