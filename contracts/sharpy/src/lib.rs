@@ -1124,6 +1124,27 @@ impl SharpyContract {
     pub fn get_template(env: Env, template_id: u64) -> Option<InvoiceTemplate> {
         env.storage().persistent().get(&template_key(template_id))
     }
+
+    pub fn set_approval_config(env: Env, caller: Address, invoice_id: u64, approvers: Vec<Address>, required: u32) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set approvers");
+        assert!(!approvers.is_empty(), "approvers empty");
+        assert!(required > 0 && required <= approvers.len() as u32, "invalid required");
+        let state = ApprovalState { approvers: approvers.clone(), required };
+        env.storage().persistent().set(&approval_key(invoice_id), &state);
+        append_audit(&env, invoice_id, symbol_short!("appr"), &caller);
+    }
+    pub fn approve_invoice(env: Env, approver: Address, invoice_id: u64) {
+        approver.require_auth();
+        let state: ApprovalState = env.storage().persistent().get(&approval_key(invoice_id)).expect("no approval config");
+        assert!(state.approvers.contains(&approver), "not approver");
+        events::invoice_approved(&env, invoice_id, &approver);
+        append_audit(&env, invoice_id, symbol_short!("appr"), &approver);
+    }
+    pub fn get_approval_state(env: Env, invoice_id: u64) -> Option<ApprovalState> {
+        env.storage().persistent().get(&approval_key(invoice_id))
+    }
 }
 
 /// Validates that a token address is not the zero address.
