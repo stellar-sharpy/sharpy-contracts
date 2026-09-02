@@ -222,3 +222,20 @@ pub fn invoice_expired(env: &Env, invoice_id: u64, deadline: u64, funded: i128) 
         InvoiceExpiredEvent { invoice_id, deadline, funded },
     );
 }
+
+/// Payload for the `tags` event — emitted when invoice tags are updated.
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceTagsUpdatedEvent {
+    pub invoice_id: u64,
+    pub updater: Address,
+    pub tag_count: u32,
+}
+
+/// Emits the `tags` event. Topic: `("tags",)`.
+pub fn invoice_tags_updated(env: &Env, invoice_id: u64, updater: &Address, tag_count: u32) {
+    env.events().publish(
+        (symbol_short!("tags"),),
+        InvoiceTagsUpdatedEvent { invoice_id, updater: updater.clone(), tag_count },
+    );
+}
