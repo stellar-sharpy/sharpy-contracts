@@ -3616,7 +3616,7 @@ mod test_batch_refund {
 
 #[cfg(test)]
 mod test_extend_deadline {
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
     use soroban_sdk::testutils::Ledger as _;
     use crate::SharpyContractClient;
     fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
