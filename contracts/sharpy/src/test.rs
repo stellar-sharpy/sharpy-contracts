@@ -3473,3 +3473,70 @@ mod test_claim_cei_pattern {
         assert_eq!(sac.balance(&account), 750i128);
     }
 }
+
+#[cfg(test)]
+mod test_invoice_tags {
+    use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec};
+    use soroban_sdk::testutils::Ledger as _;
+    use soroban_sdk::symbol_short;
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    fn no_rules(env: &Env) -> crate::types::InvoiceOptions { crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:Vec::new(env), auto_resolve_rules:Vec::new(env), arbitrator:None} }
+    #[test]
+    fn test_set_and_get_tags() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        assert!(client.get_invoice_tags(&id).is_none());
+        let tags=Vec::from_array(&env, [String::from_str(&env, "freelance"), String::from_str(&env, "design")]);
+        client.set_invoice_tags(&creator, &id, &tags);
+        let stored=client.get_invoice_tags(&id).unwrap(); assert_eq!(stored.tags.len(), 2); assert_eq!(stored.tags.get(0).unwrap(), String::from_str(&env, "freelance"));
+        // audit entry
+        let log=client.get_audit_log(&id); assert!(log.iter().any(|e| e.action==symbol_short!("tags")));
+        // update overwrites
+        let tags2=Vec::from_array(&env, [String::from_str(&env, "urgent")]);
+        client.set_invoice_tags(&creator, &id, &tags2);
+        assert_eq!(client.get_invoice_tags(&id).unwrap().tags.len(), 1);
+    }
+    #[test]
+    #[should_panic(expected = "only creator can set tags")]
+    fn test_set_tags_non_creator_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let stranger=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let tags=Vec::from_array(&env, [String::from_str(&env, "hack")]);
+        client.set_invoice_tags(&stranger, &id, &tags);
+    }
+    #[test]
+    #[should_panic(expected = "too many tags")]
+    fn test_too_many_tags_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let mut many=Vec::new(&env); for _ in 0..11 { many.push_back(String::from_str(&env, "tag")); } client.set_invoice_tags(&creator, &id, &many);
+    }
+    #[test]
+    fn test_tags_isolated_per_invoice() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id1=client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token.clone()]), &deadline, &no_rules(&env));
+        let id2=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let tags=Vec::from_array(&env, [String::from_str(&env, "only_one")]);
+        client.set_invoice_tags(&creator, &id1, &tags);
+        assert!(client.get_invoice_tags(&id2).is_none());
+    }
+    #[test]
+    fn test_tags_updated_at_advances() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let tags=Vec::from_array(&env, [String::from_str(&env, "a")]);
+        client.set_invoice_tags(&creator, &id, &tags);
+        let t1=client.get_invoice_tags(&id).unwrap().updated_at;
+        env.ledger().set_timestamp(env.ledger().timestamp()+100);
+        let tags2=Vec::from_array(&env, [String::from_str(&env, "b")]);
+        client.set_invoice_tags(&creator, &id, &tags2);
+        let t2=client.get_invoice_tags(&id).unwrap().updated_at;
+        assert!(t2 > t1);
+    }
+}
