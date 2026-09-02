@@ -293,3 +293,10 @@ pub struct TemplateCreatedEvent { pub template_id: u64, pub creator: Address }
 pub fn template_created(env: &Env, template_id: u64, creator: &Address) {
     env.events().publish((symbol_short!("tmpl"),), TemplateCreatedEvent { template_id, creator: creator.clone() });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceApprovedEvent { pub invoice_id: u64, pub approver: Address }
+pub fn invoice_approved(env: &Env, invoice_id: u64, approver: &Address) {
+    env.events().publish((symbol_short!("appr"),), InvoiceApprovedEvent { invoice_id, approver: approver.clone() });
+}

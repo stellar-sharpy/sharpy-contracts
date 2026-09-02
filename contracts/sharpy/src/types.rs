@@ -290,3 +290,11 @@ pub struct InvoiceTemplate {
     pub amounts: soroban_sdk::Vec<i128>,
     pub template_id: u64,
 }
+
+/// Approval state for invoices requiring multi-sig.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ApprovalState {
+    pub approvers: soroban_sdk::Vec<Address>,
+    pub required: u32,
+}
