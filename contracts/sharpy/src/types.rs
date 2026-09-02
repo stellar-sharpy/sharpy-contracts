@@ -275,3 +275,8 @@ pub struct DiscountConfig {
     /// Timestamp set.
     pub updated_at: u64,
 }
+
+/// Pause state for recurring invoices.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RecurringPauseState { pub paused: bool, pub updated_at: u64 }
