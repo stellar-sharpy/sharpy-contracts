@@ -239,3 +239,15 @@ pub fn invoice_tags_updated(env: &Env, invoice_id: u64, updater: &Address, tag_c
         InvoiceTagsUpdatedEvent { invoice_id, updater: updater.clone(), tag_count },
     );
 }
+
+/// Payload for the `memo` event — emitted when extra memo is updated.
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceMemoExtUpdatedEvent {
+    pub invoice_id: u64,
+    pub updater: Address,
+}
+/// Emits the `memo` event. Topic: `("memo",)`.
+pub fn invoice_memo_ext_updated(env: &Env, invoice_id: u64, updater: &Address) {
+    env.events().publish((symbol_short!("memo"),), InvoiceMemoExtUpdatedEvent { invoice_id, updater: updater.clone() });
+}
