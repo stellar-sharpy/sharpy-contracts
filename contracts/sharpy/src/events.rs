@@ -300,3 +300,10 @@ pub struct InvoiceApprovedEvent { pub invoice_id: u64, pub approver: Address }
 pub fn invoice_approved(env: &Env, invoice_id: u64, approver: &Address) {
     env.events().publish((symbol_short!("appr"),), InvoiceApprovedEvent { invoice_id, approver: approver.clone() });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceArchivedEvent { pub invoice_id: u64, pub archiver: Address }
+pub fn invoice_archived(env: &Env, invoice_id: u64, archiver: &Address) {
+    env.events().publish((symbol_short!("arch"),), InvoiceArchivedEvent { invoice_id, archiver: archiver.clone() });
+}
