@@ -280,3 +280,13 @@ pub struct DiscountConfig {
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct RecurringPauseState { pub paused: bool, pub updated_at: u64 }
+
+/// Reusable invoice template stored on-chain.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceTemplate {
+    pub name: soroban_sdk::String,
+    pub recipients: soroban_sdk::Vec<Address>,
+    pub amounts: soroban_sdk::Vec<i128>,
+    pub template_id: u64,
+}
