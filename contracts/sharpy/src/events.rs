@@ -272,3 +272,10 @@ pub struct InvoiceMetadataUpdatedEvent { pub invoice_id: u64, pub updater: Addre
 pub fn invoice_metadata_updated(env: &Env, invoice_id: u64, updater: &Address) {
     env.events().publish((symbol_short!("imeta"),), InvoiceMetadataUpdatedEvent { invoice_id, updater: updater.clone() });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct DiscountUpdatedEvent { pub invoice_id: u64, pub discount_bps: u32 }
+pub fn discount_updated(env: &Env, invoice_id: u64, discount_bps: u32) {
+    env.events().publish((symbol_short!("disc"),), DiscountUpdatedEvent { invoice_id, discount_bps });
+}

@@ -265,3 +265,13 @@ pub struct InvoiceMetadata {
     /// Last update timestamp.
     pub updated_at: u64,
 }
+
+/// Discount configuration per invoice — basis points off total.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DiscountConfig {
+    /// Discount in basis points (0-10000, 1000=10%).
+    pub discount_bps: u32,
+    /// Timestamp set.
+    pub updated_at: u64,
+}
