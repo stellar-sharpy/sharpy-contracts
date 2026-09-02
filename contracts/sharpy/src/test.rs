@@ -3752,3 +3752,30 @@ mod test_template {
     }
 }
 
+#[cfg(test)]
+mod test_approval {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    fn no_rules(env: &Env) -> crate::types::InvoiceOptions { crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:Vec::new(env), auto_resolve_rules:Vec::new(env), arbitrator:None} }
+    #[test] fn test_set_and_approve() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let approver=Address::generate(&env); let r=Address::generate(&env); let tok=Address::generate(&env); let dl=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &no_rules(&env));
+        client.set_approval_config(&creator, &id, &Vec::from_array(&env, [approver.clone()]), &1u32);
+        let state=client.get_approval_state(&id).unwrap(); assert_eq!(state.required, 1);
+        client.approve_invoice(&approver, &id);
+    }
+    #[test] #[should_panic(expected="only creator can set approvers")] fn test_non_creator_set() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let s=Address::generate(&env); let r=Address::generate(&env); let tok=Address::generate(&env); let dl=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &no_rules(&env));
+        let approver=Address::generate(&env);
+        client.set_approval_config(&s, &id, &Vec::from_array(&env, [approver]), &1u32);
+    }
+    #[test] #[should_panic(expected="not approver")] fn test_non_approver_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let approver=Address::generate(&env); let stranger=Address::generate(&env); let r=Address::generate(&env); let tok=Address::generate(&env); let dl=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &no_rules(&env));
+        client.set_approval_config(&creator, &id, &Vec::from_array(&env, [approver]), &1u32);
+        client.approve_invoice(&stranger, &id);
+    }
+}
+
