@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, SplitRule,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, SplitRule,
     SubscriptionParams,
 };
 
@@ -42,6 +42,7 @@ fn account_balance_key(account: &Address, token: &Address) -> (Symbol, Address, 
 }
 fn invoice_notes_key(id: u64) -> (Symbol, u64) { (symbol_short!("notes"), id) }
 fn invoice_tags_key(id: u64) -> (Symbol, u64) { (symbol_short!("itags"), id) }
+fn invoice_metadata_key(id: u64) -> (Symbol, u64) { (symbol_short!("imeta"), id) }
 fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id) }
 
 fn is_paused(env: &Env) -> bool {
@@ -1046,6 +1047,22 @@ impl SharpyContract {
         append_audit(&env, invoice_id, symbol_short!("ext_dead"), &caller);
         events::deadline_extended(&env, invoice_id, old, new_deadline);
         events::invoice_updated(&env, invoice_id, &caller);
+    }
+
+    pub fn set_invoice_metadata(env: Env, caller: Address, invoice_id: u64, entries: Vec<String>) {
+        require_not_paused(&env); caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set metadata");
+        assert!(entries.len() <= 10, "too many metadata entries");
+        let stored = InvoiceMetadata { entries: entries.clone(), updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&invoice_metadata_key(invoice_id), &stored);
+        env.storage().persistent().extend_ttl(&invoice_metadata_key(invoice_id), 100_000, 6_307_200);
+        append_audit(&env, invoice_id, symbol_short!("imeta"), &caller);
+        events::invoice_metadata_updated(&env, invoice_id, &caller);
+        events::invoice_updated(&env, invoice_id, &caller);
+    }
+    pub fn get_invoice_metadata(env: Env, invoice_id: u64) -> Option<InvoiceMetadata> {
+        env.storage().persistent().get(&invoice_metadata_key(invoice_id))
     }
 }
 

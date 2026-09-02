@@ -264,3 +264,11 @@ pub struct DeadlineExtendedEvent {
 pub fn deadline_extended(env: &Env, invoice_id: u64, old_deadline: u64, new_deadline: u64) {
     env.events().publish((symbol_short!("ext_dead"),), DeadlineExtendedEvent { invoice_id, old_deadline, new_deadline });
 }
+
+/// Event for metadata update.
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceMetadataUpdatedEvent { pub invoice_id: u64, pub updater: Address }
+pub fn invoice_metadata_updated(env: &Env, invoice_id: u64, updater: &Address) {
+    env.events().publish((symbol_short!("imeta"),), InvoiceMetadataUpdatedEvent { invoice_id, updater: updater.clone() });
+}
