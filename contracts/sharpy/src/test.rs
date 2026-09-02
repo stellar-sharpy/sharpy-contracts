@@ -3575,3 +3575,42 @@ mod test_invoice_memo_ext {
     }
 }
 
+#[cfg(test)]
+mod test_batch_refund {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::InvoiceStatus, SharpyContractClient};
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    fn no_rules(env: &Env) -> crate::types::InvoiceOptions { crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:Vec::new(env), auto_resolve_rules:Vec::new(env), arbitrator:None} }
+    #[test] fn test_batch_refund_two_invoices() {
+        let (env, client)=setup(); let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env); let caller=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+100;
+        let id1=client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]), &Vec::from_array(&env, [1000i128]), &Vec::from_array(&env, [tok.clone()]), &deadline, &no_rules(&env));
+        let id2=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [500i128]), &Vec::from_array(&env, [tok.clone()]), &deadline, &no_rules(&env));
+        client.pay(&payer, &id1, &200i128); client.pay(&payer, &id2, &100i128);
+        env.ledger().set_timestamp(deadline+1);
+        let n=client.refund_batch(&caller, &Vec::from_array(&env, [id1, id2])); assert_eq!(n, 2);
+        assert_eq!(client.get_invoice(&id1).status, InvoiceStatus::Refunded); assert_eq!(client.get_invoice(&id2).status, InvoiceStatus::Refunded);
+    }
+    #[test] #[should_panic(expected="refund_batch: empty list")] fn test_batch_refund_empty_panics() {
+        let (env, client)=setup(); let caller=Address::generate(&env); client.refund_batch(&caller, &Vec::new(&env));
+    }
+    #[test] #[should_panic(expected="deadline has not passed")] fn test_batch_refund_before_deadline_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let caller=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        client.refund_batch(&caller, &Vec::from_array(&env, [id]));
+    }
+    #[test] fn test_batch_refund_single() {
+        let (env, client)=setup(); let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env); let caller=Address::generate(&env);
+        sac.mint(&payer, &2000i128);
+        let deadline=env.ledger().timestamp()+10;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [1000i128]), &Vec::from_array(&env, [tok.clone()]), &deadline, &no_rules(&env));
+        client.pay(&payer, &id, &300i128);
+        env.ledger().set_timestamp(deadline+1);
+        let n=client.refund_batch(&caller, &Vec::from_array(&env, [id])); assert_eq!(n, 1);
+    }
+}
+
