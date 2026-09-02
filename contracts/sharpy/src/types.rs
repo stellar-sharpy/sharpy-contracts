@@ -255,3 +255,13 @@ pub struct InvoiceExtraMemo {
     /// Ledger timestamp of last update.
     pub updated_at: u64,
 }
+
+/// Generic metadata map for invoices — stored as Vec of key-value strings.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceMetadata {
+    /// Metadata entries as strings (e.g. "department:finance").
+    pub entries: soroban_sdk::Vec<soroban_sdk::String>,
+    /// Last update timestamp.
+    pub updated_at: u64,
+}
