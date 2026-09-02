@@ -286,3 +286,10 @@ pub struct RecurringPausedEvent { pub invoice_id: u64, pub paused: bool }
 pub fn recurring_paused(env: &Env, invoice_id: u64, paused: bool) {
     env.events().publish((symbol_short!("rpause"),), RecurringPausedEvent { invoice_id, paused });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct TemplateCreatedEvent { pub template_id: u64, pub creator: Address }
+pub fn template_created(env: &Env, template_id: u64, creator: &Address) {
+    env.events().publish((symbol_short!("tmpl"),), TemplateCreatedEvent { template_id, creator: creator.clone() });
+}
