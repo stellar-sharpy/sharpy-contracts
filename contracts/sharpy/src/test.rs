@@ -3705,3 +3705,28 @@ mod test_discount {
         client.set_discount(&s, &id, &500u32);
     }
 }
+
+#[cfg(test)]
+mod test_recurring_pause {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test] fn test_pause_resume() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let r=Address::generate(&env); let tok=Address::generate(&env); let dl=env.ledger().timestamp()+86400;
+        let id=client.create_recurring(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &86400u64, &3u32);
+        assert!(!client.is_recurring_paused(&id));
+        client.pause_recurring(&creator, &id); assert!(client.is_recurring_paused(&id));
+        client.resume_recurring(&creator, &id); assert!(!client.is_recurring_paused(&id));
+    }
+    #[test] #[should_panic(expected="only creator can pause recurring")] fn test_pause_non_creator() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let s=Address::generate(&env); let r=Address::generate(&env); let tok=Address::generate(&env); let dl=env.ledger().timestamp()+86400;
+        let id=client.create_recurring(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &86400u64, &3u32);
+        client.pause_recurring(&s, &id);
+    }
+    #[test] #[should_panic(expected="not recurring")] fn test_pause_non_recurring_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let r=Address::generate(&env); let tok=Address::generate(&env); let dl=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:Vec::new(&env), auto_resolve_rules:Vec::new(&env), arbitrator:None});
+        client.pause_recurring(&creator, &id);
+    }
+}
+
