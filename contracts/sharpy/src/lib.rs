@@ -1146,6 +1146,29 @@ impl SharpyContract {
     pub fn get_approval_state(env: Env, invoice_id: u64) -> Option<ApprovalState> {
         env.storage().persistent().get(&approval_key(invoice_id))
     }
+
+    pub fn archive_invoice(env: Env, caller: Address, invoice_id: u64) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can archive");
+        assert!(invoice.status != InvoiceStatus::Pending, "only terminal invoices can be archived");
+        let state = ArchivalState { archived: true, at: env.ledger().timestamp() };
+        env.storage().persistent().set(&archival_key(invoice_id), &state);
+        append_audit(&env, invoice_id, symbol_short!("arch"), &caller);
+        events::invoice_archived(&env, invoice_id, &caller);
+    }
+    pub fn is_archived(env: Env, invoice_id: u64) -> bool {
+        env.storage().persistent().get::<(Symbol,u64), ArchivalState>(&archival_key(invoice_id)).map(|s| s.archived).unwrap_or(false)
+    }
+    pub fn unarchive_invoice(env: Env, caller: Address, invoice_id: u64) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can unarchive");
+        let state: ArchivalState = env.storage().persistent().get(&archival_key(invoice_id)).expect("not archived");
+        assert!(state.archived, "not archived");
+        env.storage().persistent().remove(&archival_key(invoice_id));
+        append_audit(&env, invoice_id, symbol_short!("unarch"), &caller);
+    }
 }
 
 /// Validates that a token address is not the zero address.
