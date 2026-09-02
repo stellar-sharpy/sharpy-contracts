@@ -3730,3 +3730,25 @@ mod test_recurring_pause {
     }
 }
 
+#[cfg(test)]
+mod test_template {
+    use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test] fn test_create_get_template() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let r=Address::generate(&env);
+        let id=client.create_template(&creator, &String::from_str(&env, "standard"), &Vec::from_array(&env, [r.clone()]), &Vec::from_array(&env, [100i128]));
+        let tmpl=client.get_template(&id).unwrap(); assert_eq!(tmpl.name, String::from_str(&env, "standard")); assert_eq!(tmpl.recipients.get(0).unwrap(), r);
+    }
+    #[test] fn test_template_counter_increments() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let r=Address::generate(&env);
+        let id1=client.create_template(&creator, &String::from_str(&env, "a"), &Vec::from_array(&env, [r.clone()]), &Vec::from_array(&env, [10i128]));
+        let id2=client.create_template(&creator, &String::from_str(&env, "b"), &Vec::from_array(&env, [r]), &Vec::from_array(&env, [20i128]));
+        assert_eq!(id2, id1+1);
+    }
+    #[test] #[should_panic(expected="recipients empty")] fn test_template_empty_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env);
+        client.create_template(&creator, &String::from_str(&env, "empty"), &Vec::new(&env), &Vec::new(&env));
+    }
+}
+
