@@ -959,6 +959,32 @@ impl SharpyContract {
     pub fn get_invoice_notes(env: Env, invoice_id: u64) -> Option<InvoiceNotes> {
         env.storage().persistent().get(&invoice_notes_key(invoice_id))
     }
+
+    /// Attach or replace tags on an invoice. Only creator can call.
+    /// Validates: max 10 tags, each ≤32 chars. Overwrites existing tags.
+    /// Emits `tags` and `inv_upd` events, appends audit entry.
+    pub fn set_invoice_tags(env: Env, caller: Address, invoice_id: u64, tags: Vec<String>) {
+        require_not_paused(&env);
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set tags");
+        assert!(tags.len() <= 10, "too many tags: max 10");
+        for t in tags.iter() {
+            assert!(t.len() <= 32, "tag too long: max 32 chars");
+        }
+        let tag_count = tags.len() as u32;
+        let stored = InvoiceTags { tags: tags.clone(), updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&invoice_tags_key(invoice_id), &stored);
+        env.storage().persistent().extend_ttl(&invoice_tags_key(invoice_id), 100_000, 6_307_200);
+        append_audit(&env, invoice_id, symbol_short!("tags"), &caller);
+        events::invoice_tags_updated(&env, invoice_id, &caller, tag_count);
+        events::invoice_updated(&env, invoice_id, &caller);
+    }
+
+    /// Returns tags attached to an invoice, or None if none set.
+    pub fn get_invoice_tags(env: Env, invoice_id: u64) -> Option<InvoiceTags> {
+        env.storage().persistent().get(&invoice_tags_key(invoice_id))
+    }
 }
 
 /// Validates that a token address is not the zero address.
