@@ -42,6 +42,7 @@ fn account_balance_key(account: &Address, token: &Address) -> (Symbol, Address, 
 }
 fn invoice_notes_key(id: u64) -> (Symbol, u64) { (symbol_short!("notes"), id) }
 fn invoice_tags_key(id: u64) -> (Symbol, u64) { (symbol_short!("itags"), id) }
+fn discount_key(id: u64) -> (Symbol, u64) { (symbol_short!("disc"), id) }
 fn invoice_metadata_key(id: u64) -> (Symbol, u64) { (symbol_short!("imeta"), id) }
 fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id) }
 
