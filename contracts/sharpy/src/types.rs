@@ -244,3 +244,14 @@ pub struct InvoiceTags {
     /// Ledger timestamp when tags were last updated.
     pub updated_at: u64,
 }
+
+/// Extended memo field for invoices — separate from notes/tags.
+/// Stores a short string memo updated by creator, with timestamp.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceExtraMemo {
+    /// Memo text (max 256 chars enforced at contract level).
+    pub memo: soroban_sdk::String,
+    /// Ledger timestamp of last update.
+    pub updated_at: u64,
+}

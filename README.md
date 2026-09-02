@@ -2,7 +2,7 @@
 
 ![Soroban](https://img.shields.io/badge/Soroban-Protocol%2027-6C63FF?logo=stellar)
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
-![Tests](https://img.shields.io/badge/tests-134%20passing-00D4AA)
+![Tests](https://img.shields.io/badge/tests-138%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-0.2.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
@@ -80,7 +80,8 @@ graph TD
 - **Treasury & tips** — `get_treasury()` + `pay_with_tip()` routes gratuity to treasury, excluded from `funded`
 - **Freeze control** — `freeze_invoice()`/`unfreeze_invoice()` admin blocks/re-enables `pay` (frozen field)
 - **Invoice notes** — `set_invoice_notes()`/`get_invoice_notes()` free-text `InvoiceNotes { text, updated_at }`
-- **Invoice tags** — `set_invoice_tags()`/`get_invoice_tags()` categorized `InvoiceTags { tags, updated_at }` (max 10, 32 chars each)
+- **Invoice tags**
+- **Extra memo** — `set_invoice_memo_ext()`/`get_invoice_memo_ext()` creator memo `InvoiceExtraMemo { memo, updated_at }` (256 chars) — `set_invoice_tags()`/`get_invoice_tags()` categorized `InvoiceTags { tags, updated_at }` (max 10, 32 chars each)
 - **Recurring query** — `get_recurring_params()` exposes full `SubscriptionParams`
 - **Version query** — `get_invoice_version()` returns schema version (1)
 
