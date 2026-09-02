@@ -1,114 +1,116 @@
-# Sharpy Contract Architecture
+# Sharpy Architecture
 
-Internal reference for contributors. Public API usage lives in [README.md](README.md).
+This document explains internal storage layout, state machines, recurring flow, TTL strategy, and event taxonomy for contributors.
 
-## Storage key reference
+## Storage Key Reference
 
-All keys use `symbol_short!` (≤9 bytes). Globals and per-entity records:
+All persistent/instance keys are derived via `symbol_short!` (max 9 chars) + typed tuples.
 
-| Key helper | Symbol / shape | Type (logical) | Purpose |
-|------------|----------------|----------------|---------|
-| `admin_key()` | `admin` | `Address` | Contract admin |
-| `paused_key()` | `paused` | `bool` | Circuit breaker |
-| `treasury_key()` | `treasury` | `Address` | Treasury / fee destination |
-| `counter_key()` | `counter` | `u64` | Next invoice id allocator |
-| `invoice_key(id)` | `(inv, id)` | `Invoice` | Invoice record |
-| `audit_log_key(id)` | `(log, id)` | `Vec<AuditEntry>` | Per-invoice audit trail |
-| `escrow_state_key(id)` | `(escrow, id)` | escrow/dispute state | Escrow hold + dispute metadata |
-| `recurring_params_key(id)` | `(rec, id)` | `SubscriptionParams` | Recurring chain parameters |
-| `next_invoice_key(id)` | `(next_inv, id)` | `u64` | Forward link in recurring chain |
-| `creator_index_key(addr)` | `(by_ctr, Address)` | index list | Invoices created by address |
-| `payer_index_key(addr)` | `(by_pyr, Address)` | index list | Invoices a payer touched |
-| claimable balance | `(acc_bal, account, token)` | `i128` | Fallback balances after failed recipient transfers |
+| Key Symbol | Type | Storage | Description |
+|------------|------|---------|-------------|
+| `admin` | `Address` | instance | Admin set in `initialize` |
+| `treasury` | `Address` | instance | Treasury for tips |
+| `paused` | `bool` | persistent | Circuit breaker |
+| `counter` | `u64` | persistent | Global invoice ID counter |
+| `("inv", id)` | `Invoice` | persistent | Invoice body |
+| `("log", id)` | `Vec<AuditEntry>` | persistent | Per-invoice audit log |
+| `("escrow", id)` | `DisputeState` | persistent | Escrow hold state |
+| `("rec", id)` | `SubscriptionParams` | persistent | Recurring params |
+| `("next_inv", id)` | `u64` | persistent | Next recurring invoice pointer |
+| `("by_ctr", creator)` | `Vec<u64>` | persistent | Creator index |
+| `("by_pyr", payer)` | `Vec<u64>` | persistent | Payer index |
+| `("acc_bal", account, token)` | `i128` | persistent | Claimable fallback balance |
+| `("notes", id)` | `InvoiceNotes` | persistent | Free-text notes |
 
-Persistent entries are extended on write (see TTL strategy).
+TTL extension: every `save_invoice` and index/balance write calls `extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
 
-## Invoice lifecycle
+## Invoice Lifecycle State Machine
 
-```text
-                 create_invoice / create_batch / create_recurring
-                                    |
-                                    v
-                               +---------+
-                     pay*      | Pending | -- cancel (unfunded) --> Cancelled
-                  -----------> |         |
-                               +----+----+
-                                    |
-                    fully funded + non-escrow release path
-                    or escrow release after hold/dispute
-                                    |
-                    +---------------+----------------+
-                    v               v                v
-               Released         Refunded         Cancelled
-           (recipients paid)  (payers repaid)  (no pay / creator cancel)
 ```
-
-`InvoiceStatus`: `Pending` → `Released` | `Refunded` | `Cancelled`.
-
-\* `pay`, `pool_pay`, and related payment entry points contribute funding while status is `Pending`.
-
-## Escrow / dispute state machine
-
-When an invoice is created with escrow options and becomes fully funded:
-
-```text
-  Pending + payments
-        |
-        |  funding reaches total
+          create_invoice / create_batch / create_recurring
+                        |
+                        v
+                     Pending
+                        |
+        +---------------+---------------+----------------+
+        |               |               |                |
+     pay (>=total)   refund(*)    cancel_invoice    freeze/unfreeze
+        |            (deadline>)       |               (admin, stays Pending)
+        v               v              v
+     Released        Refunded      Cancelled/Refunded
+        |                             (funded?Refund:Cancel)
         v
-  Escrow hold (esc_fund event, release_at set)
-        |
-        +-- after release_at (or authorized release) --> Released
-        |
-        +-- creator raises dispute --> Disputed
-        |                                  |
-        |                    resolve(release=true)  --> Released
-        |                    resolve(release=false) --> Refunded (per-payer pyr events)
-        |
-        +-- refund / cancel paths per API guards --> Refunded | Cancelled
+   next recurring? -> spawn Pending (chain)
 ```
 
-Arbitrator/resolver auth is enforced on dispute resolution entry points. Escrow state storage is removed when the invoice leaves the hold/dispute path.
+* `refund` callable when `timestamp > deadline` on Pending invoices.
+* `_release` is internal; it sets `Released` and `completion_time`, emits `released`.
+* `cancel_invoice` by creator -> Refunded if funded>0 else Cancelled.
+* `freeze_invoice` blocks `pay()`; `unfreeze` restores.
 
-## Recurring chain flow
+### Escrow / Dispute State Machine
 
-1. `create_recurring` stores `SubscriptionParams` under `(rec, id)` and creates the first invoice (`num_created = 1`).
-2. On successful **release** of invoice `id`, if `max_recurrences == 0` (unlimited) or `num_created < max_recurrences`, the contract mints the next invoice, copies recipients/amounts/tokens, advances the deadline by `recurrence_interval`, and writes `(next_inv, id) -> next_id`.
-3. Off-chain indexers follow `next_inv` links or subscribe to `created` events from the same creator.
+```
+pay fully funded && escrow_enabled -> DisputeState{release_at, disputed=false} + esc_fund event
+        |
+   +----+----+
+   |         |
+dispute_release  release_escrow (after release_at && !disputed)
+   |         |
+   v         v
+Disputed   Released
+   |
+resolve_dispute(release=true/false) -> Released / Refunded + dsprslv/dispute events
+```
 
-## TTL strategy
+Guards: `dispute_release` requires `timestamp < release_at` and creator auth; `release_escrow` panics if disputed; `resolve_dispute` uses arbitrator if set else creator.
 
-- Invoice and related persistent keys are extended on mutation paths (pay, release, dispute, cancel, claim, etc.) so active invoices do not archive mid-lifecycle.
-- Permissionless TTL bump helpers (where exposed) let anyone keep cold-but-still-relevant invoices alive for indexers.
-- Prefer extending on write; pure getters should remain free of ledger side effects unless explicitly documented.
+## Recurring Chain Flow
 
-Exact threshold/extend values live in `contracts/sharpy/src/lib.rs` helpers — re-read them before changing rent behavior.
+1. `create_recurring(creator, ..., interval, max_recurrences)` -> id= N, stores `SubscriptionParams{creator, recipients, amounts, tokens, interval, max, num_created=1}`.
+2. On `_release` (via pay), if `params` exists and `max==0 || num_created < max`, spawn next invoice: `deadline = now + interval`, id= N+1, `num_created+1`, set `next_inv[N]=N+1`, emit `created`.
+3. Each spawned invoice carries its own copy of `SubscriptionParams` with incremented `num_created`, so chain continues independently.
+4. `max_recurrences=1` means only the genesis invoice; no next.
 
-## Event taxonomy
+## TTL Strategy (CAP-78)
 
-All events use a **single-element topic** tuple: `(symbol_short!("…"),)`. Payloads are `#[contracttype]` structs in `events.rs`.
+- Soroban persistent entries expire. Sharpy extends TTL on every write using `extend_ttl(min=100k, max=6.3M)`.
+- `bump_invoice_ttl(id)` is a manual keep-alive for long-lived invoices.
+- Invoked in: `save_invoice`, index updates, `credit_account`, `set_invoice_notes`, and explicit bump.
 
-| Topic symbol | When | Payload highlights |
-|--------------|------|--------------------|
-| `created` | Invoice created (single, batch item, or recurring generation) | `id`, `creator` |
-| `payment` | Payment applied via `pay` / `pool_pay` | `invoice_id`, `payer`, `amount` |
-| `esc_fund` | Escrow invoice reaches full funding | `invoice_id`, `release_at`, `funded` |
-| `released` | Funds distributed to recipients | `id`, `funded`, `recipient_count`, `creator` |
-| `refunded` | Invoice-level refund completed | `id`, `funded`, `recipient_count`, `creator` |
-| `pyr` | Per-payer refund slice | `invoice_id`, `payer`, `amount` |
-| `dispute` | Creator raises escrow dispute | `invoice_id`, `creator` |
-| `dsprslv` | Dispute resolved | `invoice_id`, `resolver`, `release` (bool) |
-| `cancel` | Creator cancels | `invoice_id`, `creator`, `refunded_amount` |
-| `claimed` | Fallback `claim` of `acc_bal` | `account`, `token`, `amount` |
+## Event Taxonomy
 
-Audit log entries (separate from events) append short action symbols such as `pay`, `pool_pay`, `dispute`, `resolve`, `release`, `refund`, `cancel` onto `(log, id)`.
+All events use single-element topic `symbol_short!`.
 
-## Module map
+| Topic | Struct | Emitted by |
+|-------|--------|------------|
+| `created` | `InvoiceCreatedEvent{id, creator}` | `create_invoice`, `create_batch`, `create_recurring`, recurring spawn |
+| `payment` | `PaymentReceivedEvent{invoice_id, payer, amount}` | `pay`, `pool_pay`, `pay_with_tip` |
+| `pymt_idx` | `PaymentIndexedEvent{payer, invoice_id}` | `index_invoice_for_payer` (deduplicated) |
+| `released` | `InvoiceReleasedEvent{id, funded, recipient_count, creator}` | `_release` |
+| `refunded` | `InvoiceRefundedEvent{id, funded, recipient_count, creator}` | `refund`, `resolve_dispute(refund)` |
+| `pyr` | `PayerRefundedEvent{invoice_id, payer, amount}` | `_refund_payers` (per unique payer) |
+| `dispute` | `DisputeRaisedEvent{invoice_id, creator}` | `dispute_release` |
+| `dsprslv` | `DisputeResolvedEvent{invoice_id, resolver, release}` | `resolve_dispute` |
+| `claimed` | `AccountBalanceClaimedEvent{account, token, amount}` | `claim` |
+| `cancel` | `InvoiceCancelledEvent{invoice_id, creator, refunded_amount}` | `cancel_invoice` |
+| `esc_fund` | `EscrowFundedEvent{invoice_id, release_at, funded}` | `pay`/`pool_pay` full funding with escrow |
 
-| Path | Role |
-|------|------|
-| `contracts/sharpy/src/lib.rs` | Entry points, storage helpers, state transitions |
-| `contracts/sharpy/src/types.rs` | `InvoiceStatus`, `SplitRule`, `SubscriptionParams`, … |
-| `contracts/sharpy/src/events.rs` | Typed event publishers |
+Future: `invoice_updated` and `invoice_expired` are defined for mutation/expiry paths (see events.rs).
 
-When changing lifecycle behavior, update this file and the event table in the same PR.
+## Checked Arithmetic (CAP-82)
+
+All payout math uses `checked_mul`/`checked_div`/`checked_add`/`checked_sub` to prevent overflow — important for `Percentage`/`Tiered` splits computing `funded * bps / 10000` on `i128`.
+
+## Security Notes
+
+- `claim()` follows CEI: `remove` before `transfer` (Soroban is non-reentrant but defense-in-depth).
+- `pay()` is sequential per ledger; concurrent txs are applied serially, so `total - funded` guard cannot be bypassed; overpayment attempts panic with explicit remaining amount.
+- `credit_account` uses `checked_add`.
+
+## Module Map
+
+- `contracts/sharpy/src/lib.rs` — contract impl, storage helpers, `SharpyContract`
+- `contracts/sharpy/src/events.rs` — typed event helpers
+- `contracts/sharpy/src/types.rs` — `Invoice`, `SplitRule`, `DisputeState`, etc.
+- `contracts/sharpy/src/test.rs` — 120+ unit/integration tests

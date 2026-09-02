@@ -2,7 +2,7 @@
 
 ![Soroban](https://img.shields.io/badge/Soroban-Protocol%2027-6C63FF?logo=stellar)
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
-![Tests](https://img.shields.io/badge/tests-92%20passing-00D4AA)
+![Tests](https://img.shields.io/badge/tests-138%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-0.2.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
@@ -81,6 +81,13 @@ graph TD
 - **Creator index** — `get_invoices_by_creator` for dashboard pagination
 - **Fallback balance recovery** — `claim()` + `get_claimable_balance()` for failed recipient transfers (CEI pattern)
 - **Storage TTL auto-extended** — ~1 year on every write
+- **Treasury & tips** — `get_treasury()` + `pay_with_tip()` routes gratuity to treasury, excluded from `funded`
+- **Freeze control** — `freeze_invoice()`/`unfreeze_invoice()` admin blocks/re-enables `pay` (frozen field)
+- **Invoice notes** — `set_invoice_notes()`/`get_invoice_notes()` free-text `InvoiceNotes { text, updated_at }`
+- **Invoice tags**
+- **Extra memo** — `set_invoice_memo_ext()`/`get_invoice_memo_ext()` creator memo `InvoiceExtraMemo { memo, updated_at }` (256 chars) — `set_invoice_tags()`/`get_invoice_tags()` categorized `InvoiceTags { tags, updated_at }` (max 10, 32 chars each)
+- **Recurring query** — `get_recurring_params()` exposes full `SubscriptionParams`
+- **Version query** — `get_invoice_version()` returns schema version (1)
 
 ---
 
@@ -123,6 +130,13 @@ graph TD
 | `get_invoices_by_payer(payer)` | All invoice IDs paid by a given address (payer index) |
 | `get_claimable_balance(account, token)` | Claimable balance for account after failed transfer |
 | `claim(account, token)` | Withdraw credited balance for account/token |
+| `get_invoice_version(id)` | Invoice schema version (always 1) |
+| `get_treasury()` | Treasury address set at `initialize` |
+| `pay_with_tip(payer, id, amount, tip)` | Pay with gratuity routed to treasury (tip excluded from `funded`) |
+| `freeze_invoice(id)` / `unfreeze_invoice(id)` | Admin freeze/unfreeze — blocks `pay`/`pay_with_tip` when frozen |
+| `get_recurring_params(id)` | Full `SubscriptionParams` for recurring invoices (None if not recurring) |
+| `set_invoice_notes(caller, id, text)` / `get_invoice_notes(id)` | Creator free-text notes `InvoiceNotes { text, updated_at }` |
+| `set_invoice_tags(caller, id, tags)` / `get_invoice_tags(id)` | Creator tags `InvoiceTags { tags, updated_at }` (10 max) |
 | `pause` / `unpause` | Admin circuit breaker |
 
 ---
@@ -153,7 +167,7 @@ sharpy-contracts/
 │       ├── lib.rs                   # All contract logic (600+ lines)
 │       ├── types.rs                 # Invoice, SplitRule, AuditEntry, etc.
 │       ├── events.rs                # Structured event helpers
-│       └── test.rs                  # 92 unit tests
+│       └── test.rs                  # 129 unit tests (+7 features + 12 test PRs 2026-08-28)
 └── .github/
     ├── workflows/ci.yml             # Test + WASM build on every PR
     └── ISSUE_TEMPLATE/              # Bug report, feature request
@@ -164,7 +178,7 @@ sharpy-contracts/
 ## Build & Test
 
 ```bash
-make test           # cargo test (92 passing)
+make test           # cargo test (129 passing)
 make build          # build WASM
 make optimize       # optimize WASM with stellar contract optimize
 make deploy-testnet # deploy to testnet

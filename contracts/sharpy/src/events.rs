@@ -165,3 +165,89 @@ pub fn escrow_funded(env: &Env, invoice_id: u64, release_at: u64, funded: i128) 
         EscrowFundedEvent { invoice_id, release_at, funded },
     );
 }
+
+/// Payload for the `pymt_idx` (payment indexed) event — emitted when a payer is added to the payer index.
+/// Allows indexers to subscribe to payer index changes without polling `get_invoices_by_payer`.
+#[contracttype]
+#[derive(Clone)]
+pub struct PaymentIndexedEvent {
+    pub payer: Address,
+    pub invoice_id: u64,
+}
+
+/// Emits the `pymt_idx` event. Topic: `("pymt_idx",)`.
+/// Fired when `index_invoice_for_payer` adds a new invoice_id for a payer (deduplicated).
+pub fn payment_indexed(env: &Env, payer: &Address, invoice_id: u64) {
+    env.events().publish(
+        (symbol_short!("pymt_idx"),),
+        PaymentIndexedEvent { payer: payer.clone(), invoice_id },
+    );
+}
+
+/// Payload for the `inv_upd` (invoice updated) event — emitted when mutable invoice fields are changed.
+/// Immutable fields: `creator`, `recipients`, `amounts`, `tokens`, `deadline` (commit at creation).
+/// Mutable fields: `frozen`, `notes`, `escrow_release_delay` (future), `arbitrator` (future).
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceUpdatedEvent {
+    pub invoice_id: u64,
+    pub updater: Address,
+    pub timestamp: u64,
+}
+
+/// Emits the `inv_upd` event. Topic: `("inv_upd",)`.
+/// Fired on any state-mutating invoice update (freeze/unfreeze, notes, future mutators).
+pub fn invoice_updated(env: &Env, invoice_id: u64, updater: &Address) {
+    env.events().publish(
+        (symbol_short!("inv_upd"),),
+        InvoiceUpdatedEvent { invoice_id, updater: updater.clone(), timestamp: env.ledger().timestamp() },
+    );
+}
+
+/// Payload for the `expired` (invoice expired) event — emitted when deadline passes and refund() is called.
+/// Distinct from `refunded` to let indexers distinguish manual expiry from dispute refunds.
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceExpiredEvent {
+    pub invoice_id: u64,
+    pub deadline: u64,
+    pub funded: i128,
+}
+
+/// Emits the `expired` event. Topic: `("expired",)`.
+/// Fired in `refund()` when `timestamp > deadline` before transitioning to Refunded.
+pub fn invoice_expired(env: &Env, invoice_id: u64, deadline: u64, funded: i128) {
+    env.events().publish(
+        (symbol_short!("expired"),),
+        InvoiceExpiredEvent { invoice_id, deadline, funded },
+    );
+}
+
+/// Payload for the `tags` event — emitted when invoice tags are updated.
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceTagsUpdatedEvent {
+    pub invoice_id: u64,
+    pub updater: Address,
+    pub tag_count: u32,
+}
+
+/// Emits the `tags` event. Topic: `("tags",)`.
+pub fn invoice_tags_updated(env: &Env, invoice_id: u64, updater: &Address, tag_count: u32) {
+    env.events().publish(
+        (symbol_short!("tags"),),
+        InvoiceTagsUpdatedEvent { invoice_id, updater: updater.clone(), tag_count },
+    );
+}
+
+/// Payload for the `memo` event — emitted when extra memo is updated.
+#[contracttype]
+#[derive(Clone)]
+pub struct InvoiceMemoExtUpdatedEvent {
+    pub invoice_id: u64,
+    pub updater: Address,
+}
+/// Emits the `memo` event. Topic: `("memo",)`.
+pub fn invoice_memo_ext_updated(env: &Env, invoice_id: u64, updater: &Address) {
+    env.events().publish((symbol_short!("memo"),), InvoiceMemoExtUpdatedEvent { invoice_id, updater: updater.clone() });
+}

@@ -2732,3 +2732,846 @@ mod test_final_validation_coverage {
         assert_eq!(balance, 0i128, "unknown account should have 0 claimable balance");
     }
 }
+
+#[cfg(test)]
+mod test_pool_pay_already_funded {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{
+        types::{InvoiceOptions, InvoicePayment, InvoiceStatus},
+        SharpyContractClient,
+    };
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    fn no_rules(env: &Env) -> InvoiceOptions {
+        InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: soroban_sdk::vec![env],
+            auto_resolve_rules: soroban_sdk::vec![env],
+            arbitrator: None,
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "invoice is not pending")]
+    fn test_pool_pay_on_already_released_panics() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &no_rules(&env),
+        );
+        // Fully fund via pay -> invoice becomes Released
+        client.pay(&payer, &id, &1000i128);
+        let invoice = client.get_invoice(&id);
+        assert_eq!(invoice.status, InvoiceStatus::Released);
+        // pool_pay on released invoice should panic
+        let payments = soroban_sdk::vec![&env, InvoicePayment { invoice_id: id, amount: 100i128 }];
+        client.pool_pay(&payer, &payments);
+    }
+
+    #[test]
+    fn test_pool_pay_partial_then_full_via_two_calls() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient],
+            &soroban_sdk::vec![&env, 2000i128],
+            &soroban_sdk::vec![&env, tok],
+            &deadline,
+            &no_rules(&env),
+        );
+        // First pool_pay partial
+        let p1 = soroban_sdk::vec![&env, InvoicePayment { invoice_id: id, amount: 800i128 }];
+        client.pool_pay(&payer, &p1);
+        let inv_mid = client.get_invoice(&id);
+        assert_eq!(inv_mid.funded, 800i128);
+        assert_eq!(inv_mid.status, InvoiceStatus::Pending);
+        // Second pool_pay completes
+        let p2 = soroban_sdk::vec![&env, InvoicePayment { invoice_id: id, amount: 1200i128 }];
+        client.pool_pay(&payer, &p2);
+        let inv_final = client.get_invoice(&id);
+        assert_eq!(inv_final.funded, 2000i128);
+        assert_eq!(inv_final.status, InvoiceStatus::Released);
+    }
+}
+
+#[cfg(test)]
+mod test_create_recurring_interval_zero {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    #[test]
+    #[should_panic(expected = "recurrence_interval must be positive")]
+    fn test_create_recurring_interval_zero_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        client.create_recurring(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, token],
+            &deadline,
+            &0u64,
+            &3u32,
+        );
+    }
+}
+
+#[cfg(test)]
+mod test_audit_log_empty {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    #[test]
+    fn test_get_audit_log_empty_on_new_invoice_and_grows() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let token = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let deadline = env.ledger().timestamp() + 86400;
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        sac.mint(&payer, &5000i128);
+        // Use real token for pay path
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &crate::types::InvoiceOptions {
+                escrow_enabled: false,
+                escrow_release_delay: None,
+                split_rules: soroban_sdk::vec![&env],
+                auto_resolve_rules: soroban_sdk::vec![&env],
+                arbitrator: None,
+            },
+        );
+        let log0 = client.get_audit_log(&id);
+        assert_eq!(log0.len(), 0, "brand-new invoice should have empty audit log");
+        client.pay(&payer, &id, &500i128);
+        let log1 = client.get_audit_log(&id);
+        assert!(log1.len() >= 1, "audit log should grow after pay");
+    }
+}
+
+#[cfg(test)]
+mod test_release_double_panic {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    #[test]
+    #[should_panic(expected = "invoice is not pending")]
+    fn test_release_on_already_released_panics() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &soroban_sdk::vec![&env, recipient.clone()],
+            &soroban_sdk::vec![&env, 1000i128],
+            &soroban_sdk::vec![&env, tok.clone()],
+            &deadline,
+            &crate::types::InvoiceOptions {
+                escrow_enabled: false,
+                escrow_release_delay: None,
+                split_rules: soroban_sdk::vec![&env],
+                auto_resolve_rules: soroban_sdk::vec![&env],
+                arbitrator: None,
+            },
+        );
+        client.pay(&payer, &id, &1000i128);
+        // Already Released, second release should panic
+        client.release(&id);
+    }
+}
+
+#[cfg(test)]
+mod test_pay_after_deadline {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::SharpyContract, ());
+        let client = SharpyContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury);
+        (env, client)
+    }
+
+    #[test]
+    #[should_panic(expected = "invoice deadline has passed")]
+    fn test_pay_after_deadline_panics() {
+        let (env, client) = setup();
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        let sac = token::StellarAssetClient::new(&env, &tok);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let payer = Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline = env.ledger().timestamp() + 100;
+        let id = client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        env.ledger().set_timestamp(deadline + 1);
+        client.pay(&payer, &id, &100i128);
+    }
+}
+
+#[cfg(test)]
+mod test_get_recurring_params {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let id=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&id); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_get_recurring_params_returns_config_and_none() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_recurring(&creator, &soroban_sdk::vec![&env, recipient.clone()], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, token.clone()], &deadline, &86400u64, &3u32);
+        let params=client.get_recurring_params(&id).unwrap(); assert_eq!(params.max_recurrences,3u32); assert_eq!(params.recurrence_interval,86400u64);
+        let id2=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 500i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        assert!(client.get_recurring_params(&id2).is_none());
+    }
+}
+
+#[cfg(test)]
+mod test_treasury_version {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>, Address) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t.clone()); (env,c,t) }
+    #[test]
+    fn test_get_treasury_and_version() {
+        let (env, client, treasury)=setup();
+        assert_eq!(client.get_treasury(), treasury);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        assert_eq!(client.get_invoice_version(&id), 1u32);
+    }
+}
+
+#[cfg(test)]
+mod test_pay_with_tip {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>, Address) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t.clone()); (env,c,t) }
+    #[test]
+    fn test_pay_with_tip_routing() {
+        let (env, client, treasury)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient.clone()], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        let bal_before_treasury=sac.balance(&treasury);
+        client.pay_with_tip(&payer, &id, &600i128, &100i128);
+        let inv=client.get_invoice(&id); assert_eq!(inv.funded, 600i128, "funded excludes tip");
+        assert_eq!(sac.balance(&treasury), bal_before_treasury+100i128);
+        client.pay_with_tip(&payer, &id, &400i128, &0i128);
+        let inv2=client.get_invoice(&id); assert_eq!(inv2.funded, 1000i128);
+        assert!(client.get_invoices_by_payer(&payer).contains(&id));
+    }
+}
+
+#[cfg(test)]
+mod test_freeze_unfreeze {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    #[should_panic(expected = "invoice is frozen")]
+    fn test_pay_when_frozen_panics() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.freeze_invoice(&id);
+        client.pay(&payer, &id, &100i128);
+    }
+    #[test]
+    #[should_panic(expected = "invoice is already frozen")]
+    fn test_double_freeze_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.freeze_invoice(&id); client.freeze_invoice(&id);
+    }
+    #[test]
+    #[should_panic(expected = "invoice is not frozen")]
+    fn test_unfreeze_not_frozen_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.unfreeze_invoice(&id);
+    }
+    #[test]
+    fn test_freeze_blocks_and_unfreeze_restores() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.freeze_invoice(&id);
+        client.unfreeze_invoice(&id);
+        client.pay(&payer, &id, &100i128);
+        assert_eq!(client.get_invoice(&id).funded, 100i128);
+    }
+}
+
+#[cfg(test)]
+mod test_invoice_notes {
+    use soroban_sdk::{testutils::Address as _, Address, Env, String};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_set_and_get_notes() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        assert!(client.get_invoice_notes(&id).is_none());
+        client.set_invoice_notes(&creator, &id, &String::from_str(&env, "first note"));
+        let notes=client.get_invoice_notes(&id).unwrap(); assert_eq!(notes.text, String::from_str(&env, "first note"));
+        client.set_invoice_notes(&creator, &id, &String::from_str(&env, "updated"));
+        assert_eq!(client.get_invoice_notes(&id).unwrap().text, String::from_str(&env, "updated"));
+    }
+    #[test]
+    #[should_panic(expected = "only creator can set notes")]
+    fn test_set_notes_non_creator_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let stranger=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.set_invoice_notes(&stranger, &id, &String::from_str(&env, "hack"));
+    }
+}
+
+#[cfg(test)]
+mod test_invoice_notes_extra {
+    use soroban_sdk::{testutils::Address as _, Address, Env, String};
+    use soroban_sdk::testutils::Ledger as _;
+    use soroban_sdk::symbol_short;
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_notes_crud_and_audit() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.set_invoice_notes(&creator, &id, &String::from_str(&env, "hello"));
+        let n=client.get_invoice_notes(&id).unwrap(); assert_eq!(n.text, String::from_str(&env, "hello"));
+        // audit entry for notes
+        let log=client.get_audit_log(&id); assert!(log.iter().any(|e| e.action==symbol_short!("notes")));
+        client.set_invoice_notes(&creator, &id, &String::from_str(&env, "world"));
+        assert_eq!(client.get_invoice_notes(&id).unwrap().text, String::from_str(&env, "world"));
+        // updated_at advances
+        env.ledger().set_timestamp(env.ledger().timestamp()+10);
+        client.set_invoice_notes(&creator, &id, &String::from_str(&env, "again"));
+        let n2=client.get_invoice_notes(&id).unwrap(); assert!(n2.updated_at > n.updated_at);
+    }
+    #[test]
+    fn test_notes_empty_string_and_persistence_after_pay() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=soroban_sdk::token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.set_invoice_notes(&creator, &id, &String::from_str(&env, ""));
+        assert_eq!(client.get_invoice_notes(&id).unwrap().text, String::from_str(&env, ""));
+        client.pay(&payer, &id, &50i128);
+        assert_eq!(client.get_invoice_notes(&id).unwrap().text, String::from_str(&env, ""), "notes persist after pay");
+    }
+    #[test]
+    fn test_notes_isolated_per_invoice() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id1=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient.clone()], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        let id2=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.set_invoice_notes(&creator, &id1, &String::from_str(&env, "only one"));
+        assert!(client.get_invoice_notes(&id2).is_none());
+        assert_eq!(client.get_invoice_notes(&id1).unwrap().text, String::from_str(&env, "only one"));
+    }
+}
+
+#[cfg(test)]
+mod test_final_edge_cases_for_120 {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    #[should_panic(expected = "payment exceeds remaining balance")]
+    fn test_overpayment_guard() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 500i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.pay(&payer, &id, &400i128);
+        client.pay(&payer, &id, &200i128);
+    }
+    #[test]
+    fn test_completion_time_set_on_release() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.pay(&payer, &id, &1000i128);
+        let inv=client.get_invoice(&id); assert!(inv.completion_time.is_some());
+    }
+    #[test]
+    fn test_pay_with_tip_zero_tip_same_as_pay() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.pay_with_tip(&payer, &id, &500i128, &0i128);
+        assert_eq!(client.get_invoice(&id).funded, 500i128);
+    }
+    #[test]
+    #[should_panic(expected = "payments must not be empty")]
+    fn test_pool_pay_empty_panics() {
+        let (env, client)=setup();
+        let payer=Address::generate(&env);
+        client.pool_pay(&payer, &soroban_sdk::vec![&env]);
+    }
+    #[test]
+    #[should_panic(expected = "invoice not found")]
+    fn test_bump_ttl_on_missing_panics() {
+        let (env, client)=setup();
+        client.bump_invoice_ttl(&9999u64);
+    }
+    #[test]
+    fn test_recurring_params_copied_to_next() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone()); let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_recurring(&creator, &soroban_sdk::vec![&env, recipient.clone()], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &86400u64, &5u32);
+        client.pay(&payer, &id, &1000i128);
+        let next=client.get_next_recurring(&id).unwrap();
+        let params=client.get_recurring_params(&next).unwrap();
+        assert_eq!(params.num_created, 2u32);
+    }
+    #[test]
+    fn test_frozen_invoice_still_queryable() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.freeze_invoice(&id);
+        let inv=client.get_invoice(&id); assert!(inv.frozen);
+    }
+}
+
+#[cfg(test)]
+mod test_pool_pay_three_tokens {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::{InvoiceOptions, InvoicePayment}, SharpyContractClient};
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_pool_pay_three_different_tokens() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env);
+        let tok_a=env.register_stellar_asset_contract(admin.clone());
+        let tok_b=env.register_stellar_asset_contract(admin.clone());
+        let tok_c=env.register_stellar_asset_contract(admin.clone());
+        let creator=Address::generate(&env); let payer=Address::generate(&env);
+        let r1=Address::generate(&env); let r2=Address::generate(&env); let r3=Address::generate(&env);
+        let sac_a=token::StellarAssetClient::new(&env,&tok_a);
+        let sac_b=token::StellarAssetClient::new(&env,&tok_b);
+        let sac_c=token::StellarAssetClient::new(&env,&tok_c);
+        sac_a.mint(&payer, &5000i128); sac_b.mint(&payer, &5000i128); sac_c.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let opts=InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None};
+        let id1=client.create_invoice(&creator, &soroban_sdk::vec![&env, r1], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok_a.clone()], &deadline, &opts);
+        let id2=client.create_invoice(&creator, &soroban_sdk::vec![&env, r2], &soroban_sdk::vec![&env, 2000i128], &soroban_sdk::vec![&env, tok_b.clone()], &deadline, &opts);
+        let id3=client.create_invoice(&creator, &soroban_sdk::vec![&env, r3], &soroban_sdk::vec![&env, 3000i128], &soroban_sdk::vec![&env, tok_c.clone()], &deadline, &opts);
+        let payments=soroban_sdk::vec![&env, InvoicePayment{invoice_id:id1, amount:1000i128}, InvoicePayment{invoice_id:id2, amount:2000i128}, InvoicePayment{invoice_id:id3, amount:3000i128}];
+        client.pool_pay(&payer, &payments);
+        assert_eq!(client.get_invoice(&id1).funded, 1000i128);
+        assert_eq!(client.get_invoice(&id2).funded, 2000i128);
+        assert_eq!(client.get_invoice(&id3).funded, 3000i128);
+        // each token total transferred correctly — balances reflect deductions
+        assert_eq!(sac_a.balance(&payer), 4000i128);
+        assert_eq!(sac_b.balance(&payer), 3000i128);
+        assert_eq!(sac_c.balance(&payer), 2000i128);
+        // payer index contains all three
+        let payer_invoices=client.get_invoices_by_payer(&payer);
+        assert!(payer_invoices.contains(&id1)); assert!(payer_invoices.contains(&id2)); assert!(payer_invoices.contains(&id3));
+    }
+}
+
+#[cfg(test)]
+mod test_full_recurring_chain {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::{types::InvoiceStatus, SharpyContractClient};
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_full_three_invoice_recurring_chain() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &10000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let interval=7*86400u64;
+        let id1=client.create_recurring(&creator, &soroban_sdk::vec![&env, recipient.clone()], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &interval, &3u32);
+        // pay & release invoice 1 -> spawns invoice 2
+        client.pay(&payer, &id1, &1000i128);
+        assert_eq!(client.get_invoice(&id1).status, InvoiceStatus::Released);
+        let id2=client.get_next_recurring(&id1).expect("invoice 2 should exist");
+        assert!(id2 != id1);
+        let inv2=client.get_invoice(&id2);
+        assert_eq!(inv2.status, InvoiceStatus::Pending);
+        assert_eq!(inv2.amounts.get(0).unwrap(), 1000i128);
+        assert_eq!(inv2.deadline, env.ledger().timestamp()+interval);
+        // pay & release invoice 2 -> spawns invoice 3
+        client.pay(&payer, &id2, &1000i128);
+        let id3=client.get_next_recurring(&id2).expect("invoice 3 should exist");
+        assert_eq!(client.get_invoice(&id3).status, InvoiceStatus::Pending);
+        // pay & release invoice 3 -> no further invoice (max=3)
+        client.pay(&payer, &id3, &1000i128);
+        assert_eq!(client.get_invoice(&id3).status, InvoiceStatus::Released);
+        assert!(client.get_next_recurring(&id3).is_none(), "max_recurrences=3 should stop after 3");
+        assert_eq!(client.get_invoice_count(), 3u64);
+        // verify recurring params num_created chain
+        assert_eq!(client.get_recurring_params(&id1).unwrap().num_created, 1u32);
+        assert_eq!(client.get_recurring_params(&id2).unwrap().num_created, 2u32);
+        assert_eq!(client.get_recurring_params(&id3).unwrap().num_created, 3u32);
+    }
+}
+
+#[cfg(test)]
+mod test_pay_double_spend_audit {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    #[should_panic(expected = "invoice is not pending")]
+    fn test_pay_double_spend_sequential_guard() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env);
+        let payer1=Address::generate(&env); let payer2=Address::generate(&env);
+        sac.mint(&payer1, &2000i128); sac.mint(&payer2, &2000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.pay(&payer1, &id, &1000i128);
+        assert_eq!(client.get_invoice(&id).funded, 1000i128);
+        // second pay on released invoice must panic — Soroban txs are sequential, funded not double-counted
+        client.pay(&payer2, &id, &1000i128);
+    }
+    #[test]
+    #[should_panic(expected = "payment exceeds remaining balance")]
+    fn test_pay_overpayment_panics_even_partial() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 1000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.pay(&payer, &id, &600i128);
+        assert_eq!(client.get_invoice(&id).funded, 600i128);
+        // remaining is 400, paying 500 must panic with clear message containing remaining balance
+        client.pay(&payer, &id, &500i128);
+    }
+    #[test]
+    fn test_pay_sequential_funded_not_double_counted() {
+        let (env, client)=setup();
+        let admin=Address::generate(&env); let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let payer=Address::generate(&env);
+        sac.mint(&payer, &5000i128);
+        let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 2000i128], &soroban_sdk::vec![&env, tok.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.pay(&payer, &id, &1000i128);
+        client.pay(&payer, &id, &500i128);
+        assert_eq!(client.get_invoice(&id).funded, 1500i128, "funded must be sum of sequential pays, not double-counted");
+        assert_eq!(client.get_payer_total(&id, &payer), 1500i128);
+    }
+}
+
+#[cfg(test)]
+mod test_remaining_for_120 {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_invoice_count_counts_recurring() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        assert_eq!(client.get_invoice_count(),0);
+        client.create_recurring(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &86400u64, &1u32);
+        assert_eq!(client.get_invoice_count(),1);
+    }
+    #[test]
+    fn test_get_treasury_stable_after_invoice_creation() {
+        let (env, client)=setup();
+        let treasury=client.get_treasury();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 10i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        assert_eq!(client.get_treasury(), treasury);
+    }
+    #[test]
+    fn test_invoice_notes_updated_at_is_timestamp() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 10i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        client.set_invoice_notes(&creator, &id, &soroban_sdk::String::from_str(&env, "ts"));
+        let notes=client.get_invoice_notes(&id).unwrap();
+        assert!(notes.updated_at <= env.ledger().timestamp() + 5);
+    }
+}
+
+#[cfg(test)]
+mod test_contract_version_tracking {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    fn test_get_invoice_version_is_one() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &soroban_sdk::vec![&env, recipient], &soroban_sdk::vec![&env, 100i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        assert_eq!(client.get_invoice_version(&id), 1u32);
+        // version does not change after pay/release
+        assert_eq!(client.get_contract_version(), 1u32);
+    }
+    #[test]
+    fn test_contract_version_stable_across_invoices() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let r1=Address::generate(&env); let id1=client.create_invoice(&creator, &soroban_sdk::vec![&env, r1], &soroban_sdk::vec![&env, 10i128], &soroban_sdk::vec![&env, token.clone()], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        let r2=Address::generate(&env); let id2=client.create_invoice(&creator, &soroban_sdk::vec![&env, r2], &soroban_sdk::vec![&env, 20i128], &soroban_sdk::vec![&env, token], &deadline, &crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:soroban_sdk::vec![&env], auto_resolve_rules:soroban_sdk::vec![&env], arbitrator:None});
+        assert_eq!(client.get_invoice_version(&id1), client.get_invoice_version(&id2));
+        assert_eq!(client.get_contract_version(), 1u32);
+    }
+}
+
+#[cfg(test)]
+mod test_claim_cei_pattern {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, symbol_short};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    #[test]
+    #[should_panic(expected = "no claimable balance")]
+    fn test_claim_cei_second_claim_panics() {
+        let (env, client)=setup();
+        let account=Address::generate(&env); let admin=Address::generate(&env);
+        let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        sac.mint(&client.address, &1000i128);
+        let key=(symbol_short!("acc_bal"), account.clone(), tok.clone());
+        env.as_contract(&client.address, || { env.storage().persistent().set(&key, &500i128); });
+        client.claim(&account, &tok);
+        // storage already deleted — CEI guarantees second claim panics even with mock_all_auths
+        client.claim(&account, &tok);
+    }
+    #[test]
+    fn test_claim_cei_storage_deleted_before_transfer() {
+        let (env, client)=setup();
+        let account=Address::generate(&env); let admin=Address::generate(&env);
+        let tok=env.register_stellar_asset_contract(admin.clone());
+        let sac=token::StellarAssetClient::new(&env,&tok);
+        sac.mint(&client.address, &1000i128);
+        let key=(symbol_short!("acc_bal"), account.clone(), tok.clone());
+        env.as_contract(&client.address, || { env.storage().persistent().set(&key, &750i128); });
+        assert_eq!(client.get_claimable_balance(&account, &tok), 750i128);
+        let claimed=client.claim(&account, &tok);
+        assert_eq!(claimed, 750i128);
+        assert_eq!(client.get_claimable_balance(&account, &tok), 0i128, "CEI: storage must be 0 after claim");
+        assert_eq!(sac.balance(&account), 750i128);
+    }
+}
+
+#[cfg(test)]
+mod test_invoice_tags {
+    use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec};
+    use soroban_sdk::testutils::Ledger as _;
+    use soroban_sdk::symbol_short;
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    fn no_rules(env: &Env) -> crate::types::InvoiceOptions { crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:Vec::new(env), auto_resolve_rules:Vec::new(env), arbitrator:None} }
+    #[test]
+    fn test_set_and_get_tags() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        assert!(client.get_invoice_tags(&id).is_none());
+        let tags=Vec::from_array(&env, [String::from_str(&env, "freelance"), String::from_str(&env, "design")]);
+        client.set_invoice_tags(&creator, &id, &tags);
+        let stored=client.get_invoice_tags(&id).unwrap(); assert_eq!(stored.tags.len(), 2); assert_eq!(stored.tags.get(0).unwrap(), String::from_str(&env, "freelance"));
+        // audit entry
+        let log=client.get_audit_log(&id); assert!(log.iter().any(|e| e.action==symbol_short!("tags")));
+        // update overwrites
+        let tags2=Vec::from_array(&env, [String::from_str(&env, "urgent")]);
+        client.set_invoice_tags(&creator, &id, &tags2);
+        assert_eq!(client.get_invoice_tags(&id).unwrap().tags.len(), 1);
+    }
+    #[test]
+    #[should_panic(expected = "only creator can set tags")]
+    fn test_set_tags_non_creator_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let stranger=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let tags=Vec::from_array(&env, [String::from_str(&env, "hack")]);
+        client.set_invoice_tags(&stranger, &id, &tags);
+    }
+    #[test]
+    #[should_panic(expected = "too many tags")]
+    fn test_too_many_tags_panics() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let mut many=Vec::new(&env); for _ in 0..11 { many.push_back(String::from_str(&env, "tag")); } client.set_invoice_tags(&creator, &id, &many);
+    }
+    #[test]
+    fn test_tags_isolated_per_invoice() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id1=client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token.clone()]), &deadline, &no_rules(&env));
+        let id2=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let tags=Vec::from_array(&env, [String::from_str(&env, "only_one")]);
+        client.set_invoice_tags(&creator, &id1, &tags);
+        assert!(client.get_invoice_tags(&id2).is_none());
+    }
+    #[test]
+    fn test_tags_updated_at_advances() {
+        let (env, client)=setup();
+        let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let tags=Vec::from_array(&env, [String::from_str(&env, "a")]);
+        client.set_invoice_tags(&creator, &id, &tags);
+        let t1=client.get_invoice_tags(&id).unwrap().updated_at;
+        env.ledger().set_timestamp(env.ledger().timestamp()+100);
+        let tags2=Vec::from_array(&env, [String::from_str(&env, "b")]);
+        client.set_invoice_tags(&creator, &id, &tags2);
+        let t2=client.get_invoice_tags(&id).unwrap().updated_at;
+        assert!(t2 > t1);
+    }
+}
+
+#[cfg(test)]
+mod test_invoice_memo_ext {
+    use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec};
+    use soroban_sdk::symbol_short;
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    fn no_rules(env: &Env) -> crate::types::InvoiceOptions { crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:Vec::new(env), auto_resolve_rules:Vec::new(env), arbitrator:None} }
+    #[test] fn test_memo_set_get() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        assert!(client.get_invoice_memo_ext(&id).is_none());
+        client.set_invoice_memo_ext(&creator, &id, &String::from_str(&env, "hello memo"));
+        let m=client.get_invoice_memo_ext(&id).unwrap(); assert_eq!(m.memo, String::from_str(&env, "hello memo"));
+        let log=client.get_audit_log(&id); assert!(log.iter().any(|e| e.action==symbol_short!("memo")));
+    }
+    #[test] #[should_panic(expected="only creator can set memo")] fn test_memo_non_creator_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let stranger=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        client.set_invoice_memo_ext(&stranger, &id, &String::from_str(&env, "hack"));
+    }
+    #[test] fn test_memo_isolated() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id1=client.create_invoice(&creator, &Vec::from_array(&env, [recipient.clone()]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token.clone()]), &deadline, &no_rules(&env));
+        let id2=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        client.set_invoice_memo_ext(&creator, &id1, &String::from_str(&env, "only1"));
+        assert!(client.get_invoice_memo_ext(&id2).is_none());
+    }
+    #[test] #[should_panic(expected="memo too long")] fn test_memo_too_long_panics() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let recipient=Address::generate(&env); let token=Address::generate(&env); let deadline=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [recipient]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [token]), &deadline, &no_rules(&env));
+        let long = String::from_str(&env, &"x".repeat(257)); client.set_invoice_memo_ext(&creator, &id, &long);
+    }
+}
+

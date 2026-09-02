@@ -194,6 +194,18 @@ pub struct CreateInvoiceParams {
     pub deadline: u64,
 }
 
+/// Optional notes field stored per invoice.
+/// Set by the creator after invoice creation via `set_invoice_notes`.
+/// Pure metadata — not evaluated in any payment or release logic.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceNotes {
+    /// Free-form text description or memo for this invoice.
+    pub text: soroban_sdk::String,
+    /// Ledger timestamp when notes were last updated.
+    pub updated_at: u64,
+}
+
 /// Aggregated statistics for an invoice. Returned by `get_invoice_stats`.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -219,4 +231,27 @@ pub struct InvoiceMemo {
     pub text: soroban_sdk::String,
     /// Ledger timestamp when the memo was created.
     pub created_at: u64,
+}
+
+/// Tags attached to an invoice for categorization and search.
+/// Stored per-invoice via `set_invoice_tags` / `get_invoice_tags`.
+/// Max 10 tags, each up to 32 chars — enforced at contract level.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceTags {
+    /// Ordered list of tags (e.g. ["freelance", "design", "urgent"]).
+    pub tags: soroban_sdk::Vec<soroban_sdk::String>,
+    /// Ledger timestamp when tags were last updated.
+    pub updated_at: u64,
+}
+
+/// Extended memo field for invoices — separate from notes/tags.
+/// Stores a short string memo updated by creator, with timestamp.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct InvoiceExtraMemo {
+    /// Memo text (max 256 chars enforced at contract level).
+    pub memo: soroban_sdk::String,
+    /// Ledger timestamp of last update.
+    pub updated_at: u64,
 }

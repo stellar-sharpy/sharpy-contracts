@@ -1,4 +1,15 @@
 //! Sharpy — Advanced split payment contract with recurring splits, escrow, and batch operations.
+//!
+//! ## Capabilities (30+)
+//! - **Invoice lifecycle:** `create_invoice`, `create_batch`, `create_recurring`, `pay`, `pool_pay`, `pay_with_tip`, `release`, `release_escrow`, `refund`, `cancel_invoice`, `freeze_invoice`/`unfreeze_invoice`
+//! - **Queries:** `get_invoice`, `get_invoice_stats`, `get_invoice_version`, `get_treasury`, `get_recurring_params`, `get_escrow_state`, `get_audit_log`, `get_payer_total`, `get_next_recurring`, `get_invoices_by_creator`, `get_invoices_by_payer`, `get_invoice_count`, `get_claimable_balance`, `claim`, `get_invoice_notes`, `set_invoice_notes`, `get_invoice_fingerprint`, `bump_invoice_ttl`, `preview_payout`
+//! - **Split rules:** `Fixed`, `Percentage` (≤100%), `Tiered` threshold — all checked arithmetic (CAP-82)
+//! - **Escrow & disputes:** `DisputeState` hold, `dispute_release`/`resolve_dispute` with arbitrator, `EscrowFchedule`
+//! - **Admin:** `initialize`, `pause`/`unpause`, `freeze`/`unfreeze`, `require!` macro, `_refund_payers` helper
+//! - **Storage:** `InvoiceNotes { text, updated_at }`, `SubscriptionParams`, `InvoiceStats`, TTL extend ~1y (CAP-78), SHA-256 fingerprint (CAP-75)
+//! - **Events:** `invoice_created`, `payment_received`, `invoice_released`, `invoice_refunded`, `invoice_cancelled`, `dispute_raised/resolved`, `escrow_funded`, `account_balance_claimed`
+//!
+//! Protocol 27 (soroban-sdk 26.1.0), `wasm32v1-none`, CEI `claim` pattern.
 
 #![no_std]
 
@@ -8,10 +19,11 @@ mod types;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
-    AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceOptions, InvoicePayment,
-    InvoiceStats, InvoiceStatus, Payment, SplitRule, SubscriptionParams,
+    AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, SplitRule,
+    SubscriptionParams,
 };
 
 fn admin_key() -> Symbol { symbol_short!("admin") }
@@ -28,13 +40,26 @@ fn payer_index_key(payer: &Address) -> (Symbol, Address) { (symbol_short!("by_py
 fn account_balance_key(account: &Address, token: &Address) -> (Symbol, Address, Address) {
     (symbol_short!("acc_bal"), account.clone(), token.clone())
 }
+fn invoice_notes_key(id: u64) -> (Symbol, u64) { (symbol_short!("notes"), id) }
+fn invoice_tags_key(id: u64) -> (Symbol, u64) { (symbol_short!("itags"), id) }
+fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id) }
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
 }
 
+/// Convenience macro that mirrors Solidity's `require(cond, msg)`.
+/// Panics with the given string literal when `$cond` is false.
+/// Prefer this over raw `assert!` for user-facing guards — the message is
+/// visible in transaction error metadata and test output.
+macro_rules! require {
+    ($cond:expr, $msg:literal) => {
+        assert!($cond, $msg)
+    };
+}
+
 fn require_not_paused(env: &Env) {
-    assert!(!is_paused(env), "contract is paused");
+    require!(!is_paused(env), "contract is paused");
 }
 
 fn require_admin(env: &Env) {
@@ -83,6 +108,7 @@ fn index_invoice_for_payer(env: &Env, payer: &Address, invoice_id: u64) {
         ids.push_back(invoice_id);
         env.storage().persistent().set(&key, &ids);
         env.storage().persistent().extend_ttl(&key, 100_000, 6_307_200);
+        events::payment_indexed(env, payer, invoice_id);
     }
 }
 
@@ -257,6 +283,16 @@ impl SharpyContract {
         id
     }
 
+    /// Security audit — pay() double-spend / concurrent same-invoice safety.
+    /// Soroban executes transactions sequentially within a ledger: ledgers are
+    /// applied one tx at a time, each seeing the storage writes of the prior tx.
+    /// There is no parallel execution within a block. The `total - funded` guard
+    /// is evaluated after `load_invoice` and before any state mutation; two payers
+    /// that both observe `funded=0` cannot both succeed — the first pay writes
+    /// `funded+=amount`, the second load will see the updated `funded` and the
+    /// `amount > remaining` panic will trigger. The test `test_pay_double_spend_sequential_guard`
+    /// demonstrates this with `mock_all_auths` — sequential pays respect the
+    /// remaining-balance invariant and funded is never double-counted.
     pub fn pay(env: Env, payer: Address, invoice_id: u64, amount: i128) {
         require_not_paused(&env);
         payer.require_auth();
@@ -265,9 +301,13 @@ impl SharpyContract {
         let mut invoice = load_invoice(&env, invoice_id);
         assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
         assert!(env.ledger().timestamp() <= invoice.deadline, "invoice deadline has passed");
+        assert!(!invoice.frozen, "invoice is frozen");
 
         let total: i128 = invoice.amounts.iter().sum();
-        assert!(amount <= total - invoice.funded, "payment exceeds remaining balance");
+        let remaining = total - invoice.funded;
+        if amount > remaining {
+            panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", amount, remaining);
+        }
 
         let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
         token_client.transfer(&payer, &env.current_contract_address(), &amount);
@@ -305,7 +345,10 @@ impl SharpyContract {
             assert!(inv.status == InvoiceStatus::Pending, "invoice is not pending");
             assert!(p.amount > 0, "payment amount must be positive");
             let inv_total: i128 = inv.amounts.iter().sum();
-            assert!(inv.funded + p.amount <= inv_total, "payment exceeds remaining balance");
+            let remaining = inv_total - inv.funded;
+            if inv.funded + p.amount > inv_total {
+                panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", p.amount, remaining);
+            }
             let token = inv.tokens.get(0).expect("no token");
             let prev = token_totals.get(token.clone()).unwrap_or(0);
             token_totals.set(token, prev + p.amount);
@@ -390,17 +433,7 @@ impl SharpyContract {
         if release {
             Self::_release(&env, invoice_id, &mut invoice, &resolver);
         } else {
-            let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
-            let mut totals: Map<Address, i128> = Map::new(&env);
-            for payment in invoice.payments.iter() {
-                let prev = totals.get(payment.payer.clone()).unwrap_or(0);
-                totals.set(payment.payer.clone(), prev + payment.amount);
-            }
-            for (payer, amount) in totals.iter() {
-                token_client.transfer(&env.current_contract_address(), &payer, &amount);
-                events::payer_refunded(&env, invoice_id, &payer, amount);
-            }
-
+            Self::_refund_payers(&env, invoice_id, &invoice);
             invoice.status = InvoiceStatus::Refunded;
             invoice.completion_time = Some(env.ledger().timestamp());
             save_invoice(&env, invoice_id, &invoice);
@@ -521,16 +554,10 @@ impl SharpyContract {
         assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
         assert!(env.ledger().timestamp() > invoice.deadline, "deadline has not passed");
 
-        let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
-        let mut totals: Map<Address, i128> = Map::new(&env);
-        for payment in invoice.payments.iter() {
-            let prev = totals.get(payment.payer.clone()).unwrap_or(0);
-            totals.set(payment.payer.clone(), prev + payment.amount);
-        }
-        for (payer, amount) in totals.iter() {
-            token_client.transfer(&env.current_contract_address(), &payer, &amount);
-            events::payer_refunded(&env, invoice_id, &payer, amount);
-        }
+        Self::_refund_payers(&env, invoice_id, &invoice);
+
+        // Emit distinct expiry notification before status change — lets indexers separate deadline expiry from dispute refunds
+        events::invoice_expired(&env, invoice_id, invoice.deadline, invoice.funded);
 
         invoice.status = InvoiceStatus::Refunded;
         invoice.completion_time = Some(env.ledger().timestamp());
@@ -548,16 +575,7 @@ impl SharpyContract {
         assert!(invoice.creator == caller, "only creator can cancel");
 
         if invoice.funded > 0 {
-            let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
-            let mut totals: Map<Address, i128> = Map::new(&env);
-            for payment in invoice.payments.iter() {
-                let prev = totals.get(payment.payer.clone()).unwrap_or(0);
-                totals.set(payment.payer.clone(), prev + payment.amount);
-            }
-            for (payer, amount) in totals.iter() {
-                token_client.transfer(&env.current_contract_address(), &payer, &amount);
-                events::payer_refunded(&env, invoice_id, &payer, amount);
-            }
+            Self::_refund_payers(&env, invoice_id, &invoice);
             invoice.status = InvoiceStatus::Refunded;
         } else {
             invoice.status = InvoiceStatus::Cancelled;
@@ -567,6 +585,22 @@ impl SharpyContract {
         append_audit(&env, invoice_id, symbol_short!("cancel"), &caller);
         let refunded = if invoice.status == InvoiceStatus::Refunded { invoice.funded } else { 0 };
         events::invoice_cancelled(&env, invoice_id, &caller, refunded);
+    }
+
+    /// Internal helper — refund all payers and emit per-payer events.
+    /// Aggregates payments by payer address to produce one transfer per payer.
+    /// Used by `refund`, `cancel_invoice`, and `resolve_dispute` (release=false).
+    fn _refund_payers(env: &Env, invoice_id: u64, invoice: &Invoice) {
+        let token_client = token::Client::new(env, &invoice.tokens.get(0).expect("no token"));
+        let mut totals: Map<Address, i128> = Map::new(env);
+        for payment in invoice.payments.iter() {
+            let prev = totals.get(payment.payer.clone()).unwrap_or(0);
+            totals.set(payment.payer.clone(), prev + payment.amount);
+        }
+        for (payer, amount) in totals.iter() {
+            token_client.transfer(&env.current_contract_address(), &payer, &amount);
+            events::payer_refunded(env, invoice_id, &payer, amount);
+        }
     }
 
     pub fn get_invoice(env: Env, invoice_id: u64) -> Invoice {
@@ -706,15 +740,23 @@ impl SharpyContract {
     /// Withdraws a credited balance for an account and token.
     /// Permissionless — anyone can trigger the claim for any account.
     /// The transfer goes from the contract vault to the account.
-    /// 
+    ///
     /// # Panics
     /// - If the claimable balance is zero
     /// - If the token transfer fails (e.g., account still has no trustline)
-    /// 
-    /// # Security
-    /// - CEI pattern: storage is deleted before the transfer (defense-in-depth)
-    /// - Checked arithmetic prevents overflow (balance accumulation uses checked_add)
-    /// - Composite key (account, token) prevents collision
+    ///
+    /// # Security — CEI / reentrancy review (closes #127)
+    /// Soroban has no reentrancy: contract calls are synchronous and the host
+    /// disallows callback into the same contract during `token::transfer`. Even
+    /// so, `claim()` follows Checks-Effects-Interactions (CEI) as defense-in-depth:
+    /// 1. Checks: `balance > 0` else panic.
+    /// 2. Effects: `storage.remove(key)` deletes the claimable balance BEFORE the
+    ///    external interaction. A second `claim()` on same (account,token) will
+    ///    see 0 and panic with "no claimable balance" — no double withdrawal even
+    ///    if a future host version allowed reentrancy.
+    /// 3. Interactions: `token.transfer` is the last operation; event emitted after.
+    /// Checked arithmetic in `credit_account` and composite key `(account,token)`
+    /// further isolate balances per token.
     pub fn claim(env: Env, account: Address, token: Address) -> i128 {
         require_not_paused(&env);
         let key = account_balance_key(&account, &token);
@@ -760,6 +802,31 @@ impl SharpyContract {
         env.storage().persistent().get(&counter_key()).unwrap_or(0u64)
     }
 
+
+    /// Returns the schema version of the invoice — always 1 for current contracts.
+    /// Useful for forward-compatibility checks in off-chain indexers and SDKs
+    /// when multiple contract versions may be deployed simultaneously.
+    /// Version is set at invoice creation (`version: 1` in `build_invoice`) and
+    /// never mutated, ensuring historical invoices remain version-stable across upgrades.
+    /// Off-chain clients should gate feature usage on `get_invoice_version` to
+    /// handle mixed-version deployments safely.
+    pub fn get_invoice_version(env: Env, invoice_id: u64) -> u32 {
+        load_invoice(&env, invoice_id).version
+    }
+
+    /// Returns the contract-level version for compatibility checks.
+    /// Currently always 1; bumped on breaking storage or event schema changes.
+    pub fn get_contract_version(env: Env) -> u32 {
+        let _ = env.storage().instance().get::<Symbol, Address>(&admin_key()).expect("not initialized");
+        1u32
+    }
+
+    /// Returns the treasury address set during `initialize`.
+    /// Admin-facing query for protocol dashboards and treasury management tools.
+    pub fn get_treasury(env: Env) -> Address {
+        env.storage().instance().get(&treasury_key()).expect("treasury not set")
+    }
+
     /// Returns all invoice IDs that a given address has paid toward.
     /// Indexed on every pay() call — O(1) write, O(n) read where n = unique invoices paid.
     /// Deduplicates: paying the same invoice multiple times only adds one entry.
@@ -768,6 +835,175 @@ impl SharpyContract {
             .persistent()
             .get(&payer_index_key(&payer))
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Pay toward an invoice with an optional tip.
+    /// The tip is transferred directly to the treasury on top of the invoice payment.
+    /// `tip` is stored on the Payment record but does NOT count toward `invoice.funded`
+    /// or `get_payer_total`. Set tip=0 to behave identically to `pay()`.
+    ///
+    /// # Panics
+    /// - `"payment amount must be positive"` if amount ≤ 0
+    /// - `"tip must be non-negative"` if tip < 0
+    /// - `"invoice is not pending"` if status != Pending
+    /// - `"invoice deadline has passed"` if past deadline
+    /// - `"payment exceeds remaining balance"` if amount > remaining
+    pub fn pay_with_tip(env: Env, payer: Address, invoice_id: u64, amount: i128, tip: i128) {
+        require_not_paused(&env);
+        payer.require_auth();
+        assert!(amount > 0, "payment amount must be positive");
+        assert!(tip >= 0, "tip must be non-negative");
+
+        let mut invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
+        assert!(env.ledger().timestamp() <= invoice.deadline, "invoice deadline has passed");
+        assert!(!invoice.frozen, "invoice is frozen");
+
+        let total: i128 = invoice.amounts.iter().sum();
+        let remaining = total - invoice.funded;
+        if amount > remaining {
+            panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", amount, remaining);
+        }
+
+        let token_client = token::Client::new(&env, &invoice.tokens.get(0).expect("no token"));
+
+        // Transfer invoice payment to contract vault
+        token_client.transfer(&payer, &env.current_contract_address(), &amount);
+
+        // Transfer tip directly to treasury (separate transfer, not held by contract)
+        if tip > 0 {
+            let treasury: Address = env.storage().instance().get(&treasury_key()).expect("treasury not set");
+            token_client.transfer(&payer, &treasury, &tip);
+        }
+
+        invoice.payments.push_back(Payment { payer: payer.clone(), amount, tip });
+        invoice.funded += amount;
+        index_invoice_for_payer(&env, &payer, invoice_id);
+        append_audit(&env, invoice_id, symbol_short!("pay"), &payer);
+        events::payment_received(&env, invoice_id, &payer, amount);
+
+        if invoice.funded >= total {
+            if invoice.escrow_enabled {
+                let release_at = env.ledger().timestamp() + invoice.escrow_release_delay;
+                let state = DisputeState { release_at, disputed: false, disputed_at: 0 };
+                env.storage().persistent().set(&escrow_state_key(invoice_id), &state);
+                events::escrow_funded(&env, invoice_id, release_at, invoice.funded);
+                save_invoice(&env, invoice_id, &invoice);
+            } else {
+                Self::_release(&env, invoice_id, &mut invoice, &payer);
+            }
+        } else {
+            save_invoice(&env, invoice_id, &invoice);
+        }
+    }
+
+    /// Freezes an invoice — blocks any further `pay()` calls on that invoice.
+    /// Admin-only. Sets `invoice.frozen = true`.
+    /// Use `unfreeze_invoice` to re-enable payments.
+    ///
+    /// # Panics
+    /// - `"invoice is already frozen"` if already frozen
+    pub fn freeze_invoice(env: Env, invoice_id: u64) {
+        require_admin(&env);
+        let mut invoice = load_invoice(&env, invoice_id);
+        assert!(!invoice.frozen, "invoice is already frozen");
+        invoice.frozen = true;
+        save_invoice(&env, invoice_id, &invoice);
+        append_audit(&env, invoice_id, symbol_short!("freeze"), &env.current_contract_address());
+        events::invoice_updated(&env, invoice_id, &env.current_contract_address());
+    }
+
+    /// Unfreezes a previously frozen invoice — re-enables payments.
+    /// Admin-only.
+    ///
+    /// # Panics
+    /// - `"invoice is not frozen"` if not currently frozen
+    pub fn unfreeze_invoice(env: Env, invoice_id: u64) {
+        require_admin(&env);
+        let mut invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.frozen, "invoice is not frozen");
+        invoice.frozen = false;
+        save_invoice(&env, invoice_id, &invoice);
+        append_audit(&env, invoice_id, symbol_short!("unfreeze"), &env.current_contract_address());
+        events::invoice_updated(&env, invoice_id, &env.current_contract_address());
+    }
+
+    /// Returns the subscription (recurring) configuration for a recurring invoice.
+    /// Includes creator, recipients, amounts, tokens, interval, max_recurrences,
+    /// and num_created (how many invoices have been generated so far in the chain).
+    /// Returns None for non-recurring invoices.
+    pub fn get_recurring_params(env: Env, invoice_id: u64) -> Option<SubscriptionParams> {
+        env.storage().persistent().get(&recurring_params_key(invoice_id))
+    }
+
+    /// Attaches or replaces free-text notes on an invoice.
+    /// Only callable by the invoice creator.
+    /// Notes are stored under a separate key so the core invoice struct is unchanged.
+    /// Appends a `notes` audit entry on every call.
+    ///
+    /// # Panics
+    /// - `"only creator can set notes"` if caller != invoice.creator
+    pub fn set_invoice_notes(env: Env, caller: Address, invoice_id: u64, text: String) {
+        require_not_paused(&env);
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set notes");
+
+        let notes = InvoiceNotes { text: text.clone(), updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&invoice_notes_key(invoice_id), &notes);
+        env.storage().persistent().extend_ttl(&invoice_notes_key(invoice_id), 100_000, 6_307_200);
+        append_audit(&env, invoice_id, symbol_short!("notes"), &caller);
+        events::invoice_updated(&env, invoice_id, &caller);
+    }
+
+    /// Returns the notes attached to an invoice, or None if none have been set.
+    pub fn get_invoice_notes(env: Env, invoice_id: u64) -> Option<InvoiceNotes> {
+        env.storage().persistent().get(&invoice_notes_key(invoice_id))
+    }
+
+    /// Attach or replace tags on an invoice. Only creator can call.
+    /// Validates: max 10 tags, each ≤32 chars. Overwrites existing tags.
+    /// Emits `tags` and `inv_upd` events, appends audit entry.
+    pub fn set_invoice_tags(env: Env, caller: Address, invoice_id: u64, tags: Vec<String>) {
+        require_not_paused(&env);
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set tags");
+        assert!(tags.len() <= 10, "too many tags: max 10");
+        for t in tags.iter() {
+            assert!(t.len() <= 32, "tag too long: max 32 chars");
+        }
+        let tag_count = tags.len() as u32;
+        let stored = InvoiceTags { tags: tags.clone(), updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&invoice_tags_key(invoice_id), &stored);
+        env.storage().persistent().extend_ttl(&invoice_tags_key(invoice_id), 100_000, 6_307_200);
+        append_audit(&env, invoice_id, symbol_short!("tags"), &caller);
+        events::invoice_tags_updated(&env, invoice_id, &caller, tag_count);
+        events::invoice_updated(&env, invoice_id, &caller);
+    }
+
+    /// Returns tags attached to an invoice, or None if none set.
+    pub fn get_invoice_tags(env: Env, invoice_id: u64) -> Option<InvoiceTags> {
+        env.storage().persistent().get(&invoice_tags_key(invoice_id))
+    }
+
+    /// Set extra memo on an invoice — creator only, max 256 chars.
+    pub fn set_invoice_memo_ext(env: Env, caller: Address, invoice_id: u64, memo: String) {
+        require_not_paused(&env);
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set memo");
+        assert!(memo.len() <= 256, "memo too long: max 256 chars");
+        let stored = InvoiceExtraMemo { memo: memo.clone(), updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&invoice_memo_ext_key(invoice_id), &stored);
+        env.storage().persistent().extend_ttl(&invoice_memo_ext_key(invoice_id), 100_000, 6_307_200);
+        append_audit(&env, invoice_id, symbol_short!("memo"), &caller);
+        events::invoice_memo_ext_updated(&env, invoice_id, &caller);
+        events::invoice_updated(&env, invoice_id, &caller);
+    }
+    /// Get extra memo for an invoice, or None.
+    pub fn get_invoice_memo_ext(env: Env, invoice_id: u64) -> Option<InvoiceExtraMemo> {
+        env.storage().persistent().get(&invoice_memo_ext_key(invoice_id))
     }
 }
 
