@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, SplitRule,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, SplitRule,
     SubscriptionParams,
 };
 
@@ -42,6 +42,7 @@ fn account_balance_key(account: &Address, token: &Address) -> (Symbol, Address, 
 }
 fn invoice_notes_key(id: u64) -> (Symbol, u64) { (symbol_short!("notes"), id) }
 fn invoice_tags_key(id: u64) -> (Symbol, u64) { (symbol_short!("itags"), id) }
+fn recurring_pause_key(id: u64) -> (Symbol, u64) { (symbol_short!("rpause"), id) }
 fn discount_key(id: u64) -> (Symbol, u64) { (symbol_short!("disc"), id) }
 fn invoice_metadata_key(id: u64) -> (Symbol, u64) { (symbol_short!("imeta"), id) }
 fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id) }
