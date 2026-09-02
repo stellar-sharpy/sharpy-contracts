@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, SplitRule,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, SplitRule,
     SubscriptionParams,
 };
 
@@ -1064,6 +1064,21 @@ impl SharpyContract {
     }
     pub fn get_invoice_metadata(env: Env, invoice_id: u64) -> Option<InvoiceMetadata> {
         env.storage().persistent().get(&invoice_metadata_key(invoice_id))
+    }
+
+    pub fn set_discount(env: Env, caller: Address, invoice_id: u64, discount_bps: u32) {
+        require_not_paused(&env); caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set discount");
+        assert!(discount_bps <= 10000, "discount exceeds 100%");
+        let cfg = DiscountConfig { discount_bps, updated_at: env.ledger().timestamp() };
+        env.storage().persistent().set(&discount_key(invoice_id), &cfg);
+        env.storage().persistent().extend_ttl(&discount_key(invoice_id), 100_000, 6_307_200);
+        append_audit(&env, invoice_id, symbol_short!("disc"), &caller);
+        events::discount_updated(&env, invoice_id, discount_bps);
+    }
+    pub fn get_discount(env: Env, invoice_id: u64) -> Option<DiscountConfig> {
+        env.storage().persistent().get(&discount_key(invoice_id))
     }
 }
 
