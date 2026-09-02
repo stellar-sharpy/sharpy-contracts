@@ -3680,3 +3680,28 @@ mod test_invoice_metadata {
     }
 }
 
+
+#[cfg(test)]
+mod test_discount {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) { let env=Env::default(); env.mock_all_auths(); let cid=env.register(crate::SharpyContract, ()); let c=SharpyContractClient::new(&env,&cid); let a=Address::generate(&env); let t=Address::generate(&env); c.initialize(&a,&t); (env,c) }
+    fn no_rules(env: &Env) -> crate::types::InvoiceOptions { crate::types::InvoiceOptions{escrow_enabled:false, escrow_release_delay:None, split_rules:Vec::new(env), auto_resolve_rules:Vec::new(env), arbitrator:None} }
+    #[test] fn test_discount_set_get() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let r=Address::generate(&env); let tok=Address::generate(&env); let dl=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &no_rules(&env));
+        assert!(client.get_discount(&id).is_none());
+        client.set_discount(&creator, &id, &1000u32);
+        assert_eq!(client.get_discount(&id).unwrap().discount_bps, 1000u32);
+    }
+    #[test] #[should_panic(expected="discount exceeds 100%")] fn test_discount_too_high() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let r=Address::generate(&env); let tok=Address::generate(&env); let dl=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &no_rules(&env));
+        client.set_discount(&creator, &id, &10001u32);
+    }
+    #[test] #[should_panic(expected="only creator can set discount")] fn test_discount_non_creator() {
+        let (env, client)=setup(); let creator=Address::generate(&env); let s=Address::generate(&env); let r=Address::generate(&env); let tok=Address::generate(&env); let dl=env.ledger().timestamp()+86400;
+        let id=client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &no_rules(&env));
+        client.set_discount(&s, &id, &500u32);
+    }
+}
