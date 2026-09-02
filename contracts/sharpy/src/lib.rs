@@ -1005,6 +1005,31 @@ impl SharpyContract {
     pub fn get_invoice_memo_ext(env: Env, invoice_id: u64) -> Option<InvoiceExtraMemo> {
         env.storage().persistent().get(&invoice_memo_ext_key(invoice_id))
     }
+
+    /// Refund multiple invoices in one transaction — each must be Pending and past deadline.
+    /// Permissionless (any caller pays fee), but each invoice payers are refunded individually.
+    /// Returns number of invoices refunded.
+    pub fn refund_batch(env: Env, caller: Address, invoice_ids: Vec<u64>) -> u32 {
+        require_not_paused(&env);
+        caller.require_auth();
+        assert!(!invoice_ids.is_empty(), "refund_batch: empty list");
+        assert!(invoice_ids.len() <= 10, "refund_batch: max 10");
+        let mut count: u32 = 0;
+        for id in invoice_ids.iter() {
+            let mut invoice = load_invoice(&env, id);
+            assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
+            assert!(env.ledger().timestamp() > invoice.deadline, "deadline has not passed");
+            Self::_refund_payers(&env, id, &invoice);
+            events::invoice_expired(&env, id, invoice.deadline, invoice.funded);
+            invoice.status = InvoiceStatus::Refunded;
+            invoice.completion_time = Some(env.ledger().timestamp());
+            save_invoice(&env, id, &invoice);
+            append_audit(&env, id, symbol_short!("refund"), &caller);
+            events::invoice_refunded(&env, id, invoice.funded, invoice.recipients.len() as u32, &invoice.creator);
+            count += 1;
+        }
+        count
+    }
 }
 
 /// Validates that a token address is not the zero address.
