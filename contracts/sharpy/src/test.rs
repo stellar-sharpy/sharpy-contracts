@@ -4042,5 +4042,16 @@ mod test_tranche {
         let id = mk(&env, &client, &creator);
         client.release_tranche(&creator, &id, &0u32);
     }
+
+    #[test]
+    fn test_tranche_isolated_per_invoice() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &id1, &3000u32);
+        assert_eq!(client.get_released_bps(&id1), 3000u32);
+        assert_eq!(client.get_released_bps(&id2), 0u32);
+    }
 }
 
