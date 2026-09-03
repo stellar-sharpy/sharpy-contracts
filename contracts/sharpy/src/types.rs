@@ -327,3 +327,11 @@ pub struct StreamingState {
     pub vested: i128,
     pub updated_at: u64,
 }
+
+/// Pass-through hop: settling `invoice_id` forwards to `target_invoice`.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ComposableRoute {
+    pub target_invoice: u64,
+    pub updated_at: u64,
+}
