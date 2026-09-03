@@ -4125,5 +4125,21 @@ mod test_whitelist {
         assert_eq!(wl.payers.len(), 1);
         assert_eq!(wl.payers.get(0).unwrap(), payer_b);
     }
+
+    #[test]
+    fn test_whitelist_isolated_per_invoice() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let gated_payer = Address::generate(&env);
+        let open_payer = Address::generate(&env);
+        let (gated_id, _) = mk_funded(&env, &client, &creator, &gated_payer, 1000i128);
+        let (open_id, _) = mk_funded(&env, &client, &creator, &open_payer, 1000i128);
+        client.set_whitelist(&creator, &gated_id, &Vec::from_array(&env, [gated_payer.clone()]));
+        assert!(client.get_whitelist(&open_id).is_none());
+        client.pay(&gated_payer, &gated_id, &500i128);
+        client.pay(&open_payer, &open_id, &500i128);
+        assert_eq!(client.get_invoice(&gated_id).funded, 500i128);
+        assert_eq!(client.get_invoice(&open_id).funded, 500i128);
+    }
 }
 
