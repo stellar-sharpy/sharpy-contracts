@@ -351,3 +351,12 @@ pub struct WhitelistState {
     pub payers: soroban_sdk::Vec<Address>,
     pub updated_at: u64,
 }
+
+/// Protocol fee taken on release, in basis points of 10_000.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct FeeConfig {
+    pub fee_bps: u32,
+    pub collector: Address,
+    pub updated_at: u64,
+}
