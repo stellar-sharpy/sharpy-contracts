@@ -370,3 +370,17 @@ pub struct WhitelistPayerRemovedEvent { pub invoice_id: u64, pub payer: Address 
 pub fn whitelist_payer_removed(env: &Env, invoice_id: u64, payer: &Address) {
     env.events().publish((symbol_short!("wrem"),), WhitelistPayerRemovedEvent { invoice_id, payer: payer.clone() });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct FeeConfiguredEvent { pub fee_bps: u32, pub collector: Address }
+pub fn fee_configured(env: &Env, fee_bps: u32, collector: &Address) {
+    env.events().publish((symbol_short!("fee"),), FeeConfiguredEvent { fee_bps, collector: collector.clone() });
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct FeePreviewedEvent { pub amount: i128, pub fee: i128 }
+pub fn fee_previewed(env: &Env, amount: i128, fee: i128) {
+    env.events().publish((symbol_short!("fprev"),), FeePreviewedEvent { amount, fee });
+}

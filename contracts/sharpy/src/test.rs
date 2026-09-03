@@ -4143,3 +4143,56 @@ mod test_whitelist {
     }
 }
 
+#[cfg(test)]
+mod test_fee {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    #[test]
+    fn test_fee_math_takes_bps_cut() {
+        let (env, client) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&250u32, &collector);
+        let cfg = client.get_protocol_fee().unwrap();
+        assert_eq!(cfg.fee_bps, 250u32);
+        assert_eq!(client.preview_fee(&10_000i128), 250i128);
+        assert_eq!(client.preview_fee(&1_000i128), 25i128);
+    }
+
+    #[test]
+    fn test_fee_zero_when_unset_or_zero_bps() {
+        let (env, client) = setup();
+        assert!(client.get_protocol_fee().is_none());
+        assert_eq!(client.preview_fee(&10_000i128), 0i128);
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&0u32, &collector);
+        assert_eq!(client.preview_fee(&10_000i128), 0i128);
+    }
+
+    #[test]
+    fn test_fee_preview_is_pure_and_replaceable() {
+        let (env, client) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&100u32, &collector);
+        assert_eq!(client.preview_fee(&10_000i128), 100i128);
+        // Preview must not mutate stored config
+        assert_eq!(client.get_protocol_fee().unwrap().fee_bps, 100u32);
+        // Larger amounts scale independently
+        assert_eq!(client.preview_fee(&50_000i128), 500i128);
+        // Admin can replace the config; new rate applies immediately
+        client.set_protocol_fee(&500u32, &collector);
+        assert_eq!(client.preview_fee(&10_000i128), 500i128);
+    }
+}
+

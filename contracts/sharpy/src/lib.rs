@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState, ComposableRoute, TrancheState, WhitelistState,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState, ComposableRoute, TrancheState, WhitelistState, FeeConfig,
     SubscriptionParams,
 };
 
@@ -53,6 +53,7 @@ fn streaming_key(id: u64) -> (Symbol, u64) { (symbol_short!("strm"), id) }
 fn route_key(id: u64) -> (Symbol, u64) { (symbol_short!("route"), id) }
 fn tranche_key(id: u64) -> (Symbol, u64) { (symbol_short!("tranche"), id) }
 fn whitelist_key(id: u64) -> (Symbol, u64) { (symbol_short!("wlist"), id) }
+fn fee_key() -> Symbol { symbol_short!("fee") }
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
@@ -109,6 +110,15 @@ fn require_whitelisted(env: &Env, invoice_id: u64, payer: &Address) {
             assert!(state.payers.contains(payer), "payer not whitelisted");
         }
     }
+}
+
+/// Fee math: `amount * fee_bps / 10_000`, zero when no fee is configured.
+fn calc_protocol_fee(env: &Env, amount: i128) -> i128 {
+    let bps: u32 = env.storage().instance().get::<Symbol, FeeConfig>(&fee_key()).map(|c| c.fee_bps).unwrap_or(0);
+    if bps == 0 || amount <= 0 {
+        return 0;
+    }
+    (amount * (bps as i128) / 10_000i128).max(0i128)
 }
 
 fn index_invoice_for_creator(env: &Env, creator: &Address, invoice_id: u64) {
@@ -1298,6 +1308,27 @@ impl SharpyContract {
     /// Cumulative released basis points for `invoice_id` (0 when untouched).
     pub fn get_released_bps(env: Env, invoice_id: u64) -> u32 {
         env.storage().persistent().get::<(Symbol,u64), TrancheState>(&tranche_key(invoice_id)).map(|s| s.released_bps).unwrap_or(0)
+    }
+
+    /// Set the protocol fee in bps (admin-only, capped at 100%).
+    pub fn set_protocol_fee(env: Env, fee_bps: u32, collector: Address) {
+        require_admin(&env);
+        assert!(fee_bps <= 10_000, "fee bps out of range");
+        let rc = collector.clone();
+        env.storage().instance().set(&fee_key(), &FeeConfig { fee_bps, collector: rc.clone(), updated_at: env.ledger().timestamp() });
+        events::fee_configured(&env, fee_bps, &rc);
+    }
+
+    /// Return the protocol fee config, if any.
+    pub fn get_protocol_fee(env: Env) -> Option<FeeConfig> {
+        env.storage().instance().get(&fee_key())
+    }
+
+    /// Preview the protocol fee owed on `amount` (pure query, no state change).
+    pub fn preview_fee(env: Env, amount: i128) -> i128 {
+        let fee = calc_protocol_fee(&env, amount);
+        events::fee_previewed(&env, amount, fee);
+        fee
     }
 
     /// Set the payer whitelist for `invoice_id` (creator-only; empty = open).

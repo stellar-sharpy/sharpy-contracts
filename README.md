@@ -2,7 +2,7 @@
 
 ![Soroban](https://img.shields.io/badge/Soroban-Protocol%2027-6C63FF?logo=stellar)
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
-![Tests](https://img.shields.io/badge/tests-181%20passing-00D4AA)
+![Tests](https://img.shields.io/badge/tests-184%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-0.2.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
@@ -90,6 +90,7 @@ graph TD
 - **Composable routing** — `set_route`/`get_route`/`resolve_route` pass-through hop to another invoice `ComposableRoute` (self-route and 2-cycle rejected)
 - **Tranche release** — `release_tranche`/`get_released_bps` partial release in basis points `TrancheState` (capped at 100%)
 - **Whitelist gating** — `set_whitelist`/`get_whitelist`/`add_whitelisted_payer`/`remove_whitelisted_payer` creator-managed payer allowlist enforced in `pay`
+- **Protocol fee** — `set_protocol_fee`/`get_protocol_fee`/`preview_fee` admin-set bps cut `FeeConfig` (pure preview, no release-path change)
 - **Approval flow** — `set_approval_config`/`approve_invoice`/`get_approval_state` multi-sig prep
 - **Invoice templates** — `create_template`/`get_template` reusable configs `InvoiceTemplate`
 - **Recurring pause** — `pause_recurring`/`resume_recurring`/`is_recurring_paused`
@@ -153,6 +154,7 @@ graph TD
 | `set_route(caller, id, target)` / `get_route(id)` / `resolve_route(id)` | Pass-through hop to another invoice (one level) |
 | `release_tranche(caller, id, bps)` / `get_released_bps(id)` | Partial release accounting, cumulative cap 10_000 bps |
 | `set_whitelist(caller, id, payers)` / `get_whitelist(id)` / `add_whitelisted_payer` / `remove_whitelisted_payer` | Payer allowlist enforced by `pay` (absent = open) |
+| `set_protocol_fee(bps, collector)` / `get_protocol_fee()` / `preview_fee(amount)` | Admin bps fee with pure preview query |
 | `pause` / `unpause` | Admin circuit breaker |
 
 ---
