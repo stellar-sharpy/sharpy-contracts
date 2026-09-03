@@ -2,7 +2,7 @@
 
 ![Soroban](https://img.shields.io/badge/Soroban-Protocol%2027-6C63FF?logo=stellar)
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
-![Tests](https://img.shields.io/badge/tests-165%20passing-00D4AA)
+![Tests](https://img.shields.io/badge/tests-170%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-0.2.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
@@ -86,6 +86,7 @@ graph TD
 - **Invoice notes** — `set_invoice_notes()`/`get_invoice_notes()` free-text `InvoiceNotes { text, updated_at }`
 - **Invoice tags**
 - **Archival** — `archive_invoice`/`unarchive_invoice`/`is_archived` terminal invoice archiving
+- **Streaming payments** — `create_stream`/`withdraw_vested`/`cancel_stream`/`top_up_stream` cliff-gated linear vesting `StreamingState`
 - **Approval flow** — `set_approval_config`/`approve_invoice`/`get_approval_state` multi-sig prep
 - **Invoice templates** — `create_template`/`get_template` reusable configs `InvoiceTemplate`
 - **Recurring pause** — `pause_recurring`/`resume_recurring`/`is_recurring_paused`
@@ -145,6 +146,7 @@ graph TD
 | `get_recurring_params(id)` | Full `SubscriptionParams` for recurring invoices (None if not recurring) |
 | `set_invoice_notes(caller, id, text)` / `get_invoice_notes(id)` | Creator free-text notes `InvoiceNotes { text, updated_at }` |
 | `set_invoice_tags(caller, id, tags)` / `get_invoice_tags(id)` | Creator tags `InvoiceTags { tags, updated_at }` (10 max) |
+| `create_stream(id, recipient, amount, start, end, cliff)` / `withdraw_vested(id, recipient)` / `cancel_stream(id, recipient)` / `top_up_stream(id, recipient, additional)` | Cliff-gated linear vesting schedule per invoice |
 | `pause` / `unpause` | Admin circuit breaker |
 
 ---
