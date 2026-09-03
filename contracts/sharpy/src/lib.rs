@@ -1252,6 +1252,17 @@ impl SharpyContract {
     pub fn get_route(env: Env, invoice_id: u64) -> Option<ComposableRoute> {
         env.storage().persistent().get::<(Symbol,u64), ComposableRoute>(&route_key(invoice_id))
     }
+
+    /// Follow one pass-through hop; returns `invoice_id` itself when unrouted.
+    pub fn resolve_route(env: Env, invoice_id: u64) -> u64 {
+        let key = route_key(invoice_id);
+        if let Some(route) = env.storage().persistent().get::<(Symbol,u64), ComposableRoute>(&key) {
+            events::route_resolved(&env, invoice_id, route.target_invoice);
+            route.target_invoice
+        } else {
+            invoice_id
+        }
+    }
 }
 
 /// Validates that a token address is not the zero address.
