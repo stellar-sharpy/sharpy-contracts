@@ -3961,5 +3961,18 @@ mod test_routing {
         client.set_route(&creator, &id1, &id2);
         client.set_route(&creator, &id2, &id1);
     }
+
+    #[test]
+    fn test_route_isolated_per_invoice() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        let id3 = mk(&env, &client, &creator);
+        client.set_route(&creator, &id1, &id2);
+        assert!(client.get_route(&id3).is_none());
+        assert_eq!(client.resolve_route(&id3), id3);
+        assert_eq!(client.resolve_route(&id1), id2);
+    }
 }
 
