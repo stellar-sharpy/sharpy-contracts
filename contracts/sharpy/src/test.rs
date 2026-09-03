@@ -4169,5 +4169,15 @@ mod test_fee {
         assert_eq!(client.preview_fee(&10_000i128), 250i128);
         assert_eq!(client.preview_fee(&1_000i128), 25i128);
     }
+
+    #[test]
+    fn test_fee_zero_when_unset_or_zero_bps() {
+        let (env, client) = setup();
+        assert!(client.get_protocol_fee().is_none());
+        assert_eq!(client.preview_fee(&10_000i128), 0i128);
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&0u32, &collector);
+        assert_eq!(client.preview_fee(&10_000i128), 0i128);
+    }
 }
 
