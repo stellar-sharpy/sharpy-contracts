@@ -3941,5 +3941,25 @@ mod test_routing {
         assert_eq!(client.resolve_route(&id1), id2);
         assert_eq!(client.resolve_route(&id2), id2);
     }
+
+    #[test]
+    #[should_panic(expected = "cannot route to self")]
+    fn test_route_self_route_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        client.set_route(&creator, &id1, &id1);
+    }
+
+    #[test]
+    #[should_panic(expected = "route cycle detected")]
+    fn test_route_two_cycle_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        client.set_route(&creator, &id1, &id2);
+        client.set_route(&creator, &id2, &id1);
+    }
 }
 
