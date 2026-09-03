@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState, ComposableRoute,
     SubscriptionParams,
 };
 
@@ -50,6 +50,7 @@ fn discount_key(id: u64) -> (Symbol, u64) { (symbol_short!("disc"), id) }
 fn invoice_metadata_key(id: u64) -> (Symbol, u64) { (symbol_short!("imeta"), id) }
 fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id) }
 fn streaming_key(id: u64) -> (Symbol, u64) { (symbol_short!("strm"), id) }
+fn route_key(id: u64) -> (Symbol, u64) { (symbol_short!("route"), id) }
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
@@ -1233,6 +1234,38 @@ impl SharpyContract {
         env.storage().persistent().set(&key, &state);
         events::streaming_topped_up(&env, invoice_id, additional);
         state.amount
+    }
+
+    /// Point `invoice_id` at `target_invoice` as a pass-through hop.
+    pub fn set_route(env: Env, caller: Address, invoice_id: u64, target_invoice: u64) {
+        caller.require_auth();
+        assert!(target_invoice != invoice_id, "cannot route to self");
+        let _ = load_invoice(&env, invoice_id);
+        let _ = load_invoice(&env, target_invoice);
+        if let Some(back) = env.storage().persistent().get::<(Symbol,u64), ComposableRoute>(&route_key(target_invoice)) {
+            assert!(back.target_invoice != invoice_id, "route cycle detected");
+        }
+        env.storage().persistent().set(&route_key(invoice_id), &ComposableRoute {
+            target_invoice,
+            updated_at: env.ledger().timestamp(),
+        });
+        events::route_set(&env, invoice_id, target_invoice);
+    }
+
+    /// Return the configured hop for `invoice_id`, if any.
+    pub fn get_route(env: Env, invoice_id: u64) -> Option<ComposableRoute> {
+        env.storage().persistent().get::<(Symbol,u64), ComposableRoute>(&route_key(invoice_id))
+    }
+
+    /// Follow one pass-through hop; returns `invoice_id` itself when unrouted.
+    pub fn resolve_route(env: Env, invoice_id: u64) -> u64 {
+        let key = route_key(invoice_id);
+        if let Some(route) = env.storage().persistent().get::<(Symbol,u64), ComposableRoute>(&key) {
+            events::route_resolved(&env, invoice_id, route.target_invoice);
+            route.target_invoice
+        } else {
+            invoice_id
+        }
     }
 }
 
