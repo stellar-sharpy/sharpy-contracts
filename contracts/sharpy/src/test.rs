@@ -4106,5 +4106,24 @@ mod test_whitelist {
         client.set_whitelist(&creator, &id, &Vec::from_array(&env, [allowed]));
         client.pay(&stranger, &id, &500i128);
     }
+
+    #[test]
+    fn test_whitelist_add_remove_roundtrip() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer_a = Address::generate(&env);
+        let payer_b = Address::generate(&env);
+        let (id, _) = mk_funded(&env, &client, &creator, &payer_b, 1000i128);
+        client.set_whitelist(&creator, &id, &Vec::from_array(&env, [payer_a.clone()]));
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 1);
+        client.add_whitelisted_payer(&creator, &id, &payer_b);
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 2);
+        client.pay(&payer_b, &id, &500i128);
+        assert_eq!(client.get_invoice(&id).funded, 500i128);
+        client.remove_whitelisted_payer(&creator, &id, &payer_a);
+        let wl = client.get_whitelist(&id).unwrap();
+        assert_eq!(wl.payers.len(), 1);
+        assert_eq!(wl.payers.get(0).unwrap(), payer_b);
+    }
 }
 
