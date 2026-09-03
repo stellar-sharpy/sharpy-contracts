@@ -4179,5 +4179,20 @@ mod test_fee {
         client.set_protocol_fee(&0u32, &collector);
         assert_eq!(client.preview_fee(&10_000i128), 0i128);
     }
+
+    #[test]
+    fn test_fee_preview_is_pure_and_replaceable() {
+        let (env, client) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&100u32, &collector);
+        assert_eq!(client.preview_fee(&10_000i128), 100i128);
+        // Preview must not mutate stored config
+        assert_eq!(client.get_protocol_fee().unwrap().fee_bps, 100u32);
+        // Larger amounts scale independently
+        assert_eq!(client.preview_fee(&50_000i128), 500i128);
+        // Admin can replace the config; new rate applies immediately
+        client.set_protocol_fee(&500u32, &collector);
+        assert_eq!(client.preview_fee(&10_000i128), 500i128);
+    }
 }
 
