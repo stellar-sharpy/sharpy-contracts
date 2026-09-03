@@ -3976,3 +3976,82 @@ mod test_routing {
     }
 }
 
+#[cfg(test)]
+mod test_tranche {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [1000i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_tranche_partial_then_full() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        assert_eq!(client.get_released_bps(&id), 0u32);
+        assert_eq!(client.release_tranche(&creator, &id, &2500u32), 2500u32);
+        assert_eq!(client.release_tranche(&creator, &id, &7500u32), 10_000u32);
+        assert_eq!(client.get_released_bps(&id), 10_000u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "tranches exceed 100%")]
+    fn test_tranche_over_release_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &id, &9000u32);
+        client.release_tranche(&creator, &id, &2000u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "bps out of range")]
+    fn test_tranche_zero_bps_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &id, &0u32);
+    }
+
+    #[test]
+    fn test_tranche_isolated_per_invoice() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &id1, &3000u32);
+        assert_eq!(client.get_released_bps(&id1), 3000u32);
+        assert_eq!(client.get_released_bps(&id2), 0u32);
+    }
+}
+

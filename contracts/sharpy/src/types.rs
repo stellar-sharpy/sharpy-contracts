@@ -335,3 +335,11 @@ pub struct ComposableRoute {
     pub target_invoice: u64,
     pub updated_at: u64,
 }
+
+/// Cumulative tranche-release accounting per invoice (basis points of 10_000).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TrancheState {
+    pub released_bps: u32,
+    pub updated_at: u64,
+}

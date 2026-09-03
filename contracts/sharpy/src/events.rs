@@ -349,3 +349,10 @@ pub struct RouteResolvedEvent { pub invoice_id: u64, pub target_invoice: u64 }
 pub fn route_resolved(env: &Env, invoice_id: u64, target_invoice: u64) {
     env.events().publish((symbol_short!("rslv"),), RouteResolvedEvent { invoice_id, target_invoice });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct TrancheReleasedEvent { pub invoice_id: u64, pub bps: u32, pub cumulative_bps: u32 }
+pub fn tranche_released(env: &Env, invoice_id: u64, bps: u32, cumulative_bps: u32) {
+    env.events().publish((symbol_short!("tranch"),), TrancheReleasedEvent { invoice_id, bps, cumulative_bps });
+}
