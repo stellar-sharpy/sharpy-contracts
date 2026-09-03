@@ -343,3 +343,11 @@ pub struct TrancheState {
     pub released_bps: u32,
     pub updated_at: u64,
 }
+
+/// Payer whitelist gating payments per invoice. Absent = open to all.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct WhitelistState {
+    pub payers: soroban_sdk::Vec<Address>,
+    pub updated_at: u64,
+}

@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState, ComposableRoute, TrancheState,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState, ComposableRoute, TrancheState, WhitelistState,
     SubscriptionParams,
 };
 
@@ -52,6 +52,7 @@ fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id)
 fn streaming_key(id: u64) -> (Symbol, u64) { (symbol_short!("strm"), id) }
 fn route_key(id: u64) -> (Symbol, u64) { (symbol_short!("route"), id) }
 fn tranche_key(id: u64) -> (Symbol, u64) { (symbol_short!("tranche"), id) }
+fn whitelist_key(id: u64) -> (Symbol, u64) { (symbol_short!("wlist"), id) }
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
@@ -99,6 +100,15 @@ fn bump_counter(env: &Env) -> u64 {
     let id: u64 = env.storage().persistent().get(&counter_key()).unwrap_or(0u64) + 1;
     env.storage().persistent().set(&counter_key(), &id);
     id
+}
+
+/// Pay-guard: when a whitelist exists and is non-empty, only listed payers pass.
+fn require_whitelisted(env: &Env, invoice_id: u64, payer: &Address) {
+    if let Some(state) = env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id)) {
+        if !state.payers.is_empty() {
+            assert!(state.payers.contains(payer), "payer not whitelisted");
+        }
+    }
 }
 
 fn index_invoice_for_creator(env: &Env, creator: &Address, invoice_id: u64) {
@@ -305,6 +315,7 @@ impl SharpyContract {
     pub fn pay(env: Env, payer: Address, invoice_id: u64, amount: i128) {
         require_not_paused(&env);
         payer.require_auth();
+        require_whitelisted(&env, invoice_id, &payer);
         assert!(amount > 0, "payment amount must be positive");
 
         let mut invoice = load_invoice(&env, invoice_id);
@@ -1287,6 +1298,58 @@ impl SharpyContract {
     /// Cumulative released basis points for `invoice_id` (0 when untouched).
     pub fn get_released_bps(env: Env, invoice_id: u64) -> u32 {
         env.storage().persistent().get::<(Symbol,u64), TrancheState>(&tranche_key(invoice_id)).map(|s| s.released_bps).unwrap_or(0)
+    }
+
+    /// Set the payer whitelist for `invoice_id` (creator-only; empty = open).
+    pub fn set_whitelist(env: Env, caller: Address, invoice_id: u64, payers: Vec<Address>) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set whitelist");
+        let count = payers.len();
+        env.storage().persistent().set(&whitelist_key(invoice_id), &WhitelistState {
+            payers,
+            updated_at: env.ledger().timestamp(),
+        });
+        events::whitelist_set(&env, invoice_id, count);
+    }
+
+    /// Return the payer whitelist for `invoice_id`, if any.
+    pub fn get_whitelist(env: Env, invoice_id: u64) -> Option<WhitelistState> {
+        env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id))
+    }
+
+    /// Add one payer to the whitelist (creator-only).
+    pub fn add_whitelisted_payer(env: Env, caller: Address, invoice_id: u64, payer: Address) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can edit whitelist");
+        let mut state: WhitelistState = env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id)).unwrap_or(WhitelistState { payers: Vec::new(&env), updated_at: 0 });
+        if !state.payers.contains(&payer) {
+            state.payers.push_back(payer);
+        }
+        state.updated_at = env.ledger().timestamp();
+        let count = state.payers.len();
+        env.storage().persistent().set(&whitelist_key(invoice_id), &state);
+        events::whitelist_set(&env, invoice_id, count);
+    }
+
+    /// Remove one payer from the whitelist (creator-only).
+    pub fn remove_whitelisted_payer(env: Env, caller: Address, invoice_id: u64, payer: Address) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can edit whitelist");
+        let mut state: WhitelistState = env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id)).expect("no whitelist");
+        let rc = payer.clone();
+        let mut kept = Vec::new(&env);
+        for p in state.payers.iter() {
+            if p != rc {
+                kept.push_back(p);
+            }
+        }
+        state.payers = kept;
+        state.updated_at = env.ledger().timestamp();
+        env.storage().persistent().set(&whitelist_key(invoice_id), &state);
+        events::whitelist_payer_removed(&env, invoice_id, &rc);
     }
 }
 

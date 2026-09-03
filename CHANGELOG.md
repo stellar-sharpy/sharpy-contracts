@@ -3,6 +3,7 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
+- feat: whitelist gating — `set/get_whitelist` + add/remove enforced in `pay` (`WhitelistState`, 181 tests)
 - feat: tranche release — `release_tranche`/`get_released_bps` partial release in bps (`TrancheState`, 178 tests)
 - feat: composable routing — `set_route`/`get_route`/`resolve_route` pass-through hop (`ComposableRoute`, 174 tests)
 - feat: streaming payments — `create_stream`/`withdraw_vested`/`cancel_stream`/`top_up_stream` cliff-gated linear vesting (`StreamingState`, 170 tests)

@@ -356,3 +356,17 @@ pub struct TrancheReleasedEvent { pub invoice_id: u64, pub bps: u32, pub cumulat
 pub fn tranche_released(env: &Env, invoice_id: u64, bps: u32, cumulative_bps: u32) {
     env.events().publish((symbol_short!("tranch"),), TrancheReleasedEvent { invoice_id, bps, cumulative_bps });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct WhitelistSetEvent { pub invoice_id: u64, pub payer_count: u32 }
+pub fn whitelist_set(env: &Env, invoice_id: u64, payer_count: u32) {
+    env.events().publish((symbol_short!("wlist"),), WhitelistSetEvent { invoice_id, payer_count });
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct WhitelistPayerRemovedEvent { pub invoice_id: u64, pub payer: Address }
+pub fn whitelist_payer_removed(env: &Env, invoice_id: u64, payer: &Address) {
+    env.events().publish((symbol_short!("wrem"),), WhitelistPayerRemovedEvent { invoice_id, payer: payer.clone() });
+}

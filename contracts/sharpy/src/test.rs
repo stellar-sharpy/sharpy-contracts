@@ -4055,3 +4055,91 @@ mod test_tranche {
     }
 }
 
+#[cfg(test)]
+mod test_whitelist {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk_funded(env: &Env, client: &SharpyContractClient<'_>, creator: &Address, payer: &Address, amt: i128) -> (u64, Address) {
+        let admin = Address::generate(env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        token::StellarAssetClient::new(env, &tok).mint(payer, &amt);
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [amt]),
+            &Vec::from_array(env, [tok.clone()]),
+            &dl,
+            &opts,
+        );
+        (id, tok)
+    }
+
+    #[test]
+    #[should_panic(expected = "payer not whitelisted")]
+    fn test_whitelist_blocks_non_listed_payer() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let allowed = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let (id, _) = mk_funded(&env, &client, &creator, &stranger, 1000i128);
+        client.set_whitelist(&creator, &id, &Vec::from_array(&env, [allowed]));
+        client.pay(&stranger, &id, &500i128);
+    }
+
+    #[test]
+    fn test_whitelist_add_remove_roundtrip() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer_a = Address::generate(&env);
+        let payer_b = Address::generate(&env);
+        let (id, _) = mk_funded(&env, &client, &creator, &payer_b, 1000i128);
+        client.set_whitelist(&creator, &id, &Vec::from_array(&env, [payer_a.clone()]));
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 1);
+        client.add_whitelisted_payer(&creator, &id, &payer_b);
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 2);
+        client.pay(&payer_b, &id, &500i128);
+        assert_eq!(client.get_invoice(&id).funded, 500i128);
+        client.remove_whitelisted_payer(&creator, &id, &payer_a);
+        let wl = client.get_whitelist(&id).unwrap();
+        assert_eq!(wl.payers.len(), 1);
+        assert_eq!(wl.payers.get(0).unwrap(), payer_b);
+    }
+
+    #[test]
+    fn test_whitelist_isolated_per_invoice() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let gated_payer = Address::generate(&env);
+        let open_payer = Address::generate(&env);
+        let (gated_id, _) = mk_funded(&env, &client, &creator, &gated_payer, 1000i128);
+        let (open_id, _) = mk_funded(&env, &client, &creator, &open_payer, 1000i128);
+        client.set_whitelist(&creator, &gated_id, &Vec::from_array(&env, [gated_payer.clone()]));
+        assert!(client.get_whitelist(&open_id).is_none());
+        client.pay(&gated_payer, &gated_id, &500i128);
+        client.pay(&open_payer, &open_id, &500i128);
+        assert_eq!(client.get_invoice(&gated_id).funded, 500i128);
+        assert_eq!(client.get_invoice(&open_id).funded, 500i128);
+    }
+}
+
