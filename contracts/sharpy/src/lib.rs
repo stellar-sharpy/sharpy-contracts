@@ -1210,6 +1210,17 @@ impl SharpyContract {
         events::streaming_withdrawn(&env, invoice_id, &rc, withdraw_amount);
         withdraw_amount
     }
+
+    /// Cancel a stream, returning the unvested remainder.
+    pub fn cancel_stream(env: Env, invoice_id: u64, _recipient: Address) -> i128 {
+        let key = streaming_key(invoice_id);
+        let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
+        let remaining = state.amount - state.vested;
+        state.vested = state.amount;
+        env.storage().persistent().set(&key, &state);
+        events::streaming_cancelled(&env, invoice_id);
+        remaining
+    }
 }
 
 /// Validates that a token address is not the zero address.
