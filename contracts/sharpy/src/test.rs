@@ -4055,3 +4055,56 @@ mod test_tranche {
     }
 }
 
+#[cfg(test)]
+mod test_whitelist {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk_funded(env: &Env, client: &SharpyContractClient<'_>, creator: &Address, payer: &Address, amt: i128) -> (u64, Address) {
+        let admin = Address::generate(env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        token::StellarAssetClient::new(env, &tok).mint(payer, &amt);
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [amt]),
+            &Vec::from_array(env, [tok.clone()]),
+            &dl,
+            &opts,
+        );
+        (id, tok)
+    }
+
+    #[test]
+    #[should_panic(expected = "payer not whitelisted")]
+    fn test_whitelist_blocks_non_listed_payer() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let allowed = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let (id, _) = mk_funded(&env, &client, &creator, &stranger, 1000i128);
+        client.set_whitelist(&creator, &id, &Vec::from_array(&env, [allowed]));
+        client.pay(&stranger, &id, &500i128);
+    }
+}
+
