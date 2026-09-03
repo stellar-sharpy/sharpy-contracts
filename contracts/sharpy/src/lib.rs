@@ -1307,6 +1307,40 @@ impl SharpyContract {
     pub fn get_whitelist(env: Env, invoice_id: u64) -> Option<WhitelistState> {
         env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id))
     }
+
+    /// Add one payer to the whitelist (creator-only).
+    pub fn add_whitelisted_payer(env: Env, caller: Address, invoice_id: u64, payer: Address) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can edit whitelist");
+        let mut state: WhitelistState = env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id)).unwrap_or(WhitelistState { payers: Vec::new(&env), updated_at: 0 });
+        if !state.payers.contains(&payer) {
+            state.payers.push_back(payer);
+        }
+        state.updated_at = env.ledger().timestamp();
+        let count = state.payers.len();
+        env.storage().persistent().set(&whitelist_key(invoice_id), &state);
+        events::whitelist_set(&env, invoice_id, count);
+    }
+
+    /// Remove one payer from the whitelist (creator-only).
+    pub fn remove_whitelisted_payer(env: Env, caller: Address, invoice_id: u64, payer: Address) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can edit whitelist");
+        let mut state: WhitelistState = env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id)).expect("no whitelist");
+        let rc = payer.clone();
+        let mut kept = Vec::new(&env);
+        for p in state.payers.iter() {
+            if p != rc {
+                kept.push_back(p);
+            }
+        }
+        state.payers = kept;
+        state.updated_at = env.ledger().timestamp();
+        env.storage().persistent().set(&whitelist_key(invoice_id), &state);
+        events::whitelist_payer_removed(&env, invoice_id, &rc);
+    }
 }
 
 /// Validates that a token address is not the zero address.
