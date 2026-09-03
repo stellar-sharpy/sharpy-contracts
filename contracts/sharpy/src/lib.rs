@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState, ComposableRoute, TrancheState,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState, ComposableRoute, TrancheState, WhitelistState,
     SubscriptionParams,
 };
 
@@ -52,6 +52,7 @@ fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id)
 fn streaming_key(id: u64) -> (Symbol, u64) { (symbol_short!("strm"), id) }
 fn route_key(id: u64) -> (Symbol, u64) { (symbol_short!("route"), id) }
 fn tranche_key(id: u64) -> (Symbol, u64) { (symbol_short!("tranche"), id) }
+fn whitelist_key(id: u64) -> (Symbol, u64) { (symbol_short!("wlist"), id) }
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
@@ -1287,6 +1288,24 @@ impl SharpyContract {
     /// Cumulative released basis points for `invoice_id` (0 when untouched).
     pub fn get_released_bps(env: Env, invoice_id: u64) -> u32 {
         env.storage().persistent().get::<(Symbol,u64), TrancheState>(&tranche_key(invoice_id)).map(|s| s.released_bps).unwrap_or(0)
+    }
+
+    /// Set the payer whitelist for `invoice_id` (creator-only; empty = open).
+    pub fn set_whitelist(env: Env, caller: Address, invoice_id: u64, payers: Vec<Address>) {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can set whitelist");
+        let count = payers.len();
+        env.storage().persistent().set(&whitelist_key(invoice_id), &WhitelistState {
+            payers,
+            updated_at: env.ledger().timestamp(),
+        });
+        events::whitelist_set(&env, invoice_id, count);
+    }
+
+    /// Return the payer whitelist for `invoice_id`, if any.
+    pub fn get_whitelist(env: Env, invoice_id: u64) -> Option<WhitelistState> {
+        env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id))
     }
 }
 
