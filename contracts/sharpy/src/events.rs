@@ -335,3 +335,17 @@ pub struct StreamingToppedUpEvent { pub invoice_id: u64, pub amount: i128 }
 pub fn streaming_topped_up(env: &Env, invoice_id: u64, amount: i128) {
     env.events().publish((symbol_short!("tup"),), StreamingToppedUpEvent { invoice_id, amount });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct RouteSetEvent { pub invoice_id: u64, pub target_invoice: u64 }
+pub fn route_set(env: &Env, invoice_id: u64, target_invoice: u64) {
+    env.events().publish((symbol_short!("route"),), RouteSetEvent { invoice_id, target_invoice });
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct RouteResolvedEvent { pub invoice_id: u64, pub target_invoice: u64 }
+pub fn route_resolved(env: &Env, invoice_id: u64, target_invoice: u64) {
+    env.events().publish((symbol_short!("rslv"),), RouteResolvedEvent { invoice_id, target_invoice });
+}
