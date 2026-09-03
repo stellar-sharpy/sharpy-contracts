@@ -4143,3 +4143,31 @@ mod test_whitelist {
     }
 }
 
+#[cfg(test)]
+mod test_fee {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    #[test]
+    fn test_fee_math_takes_bps_cut() {
+        let (env, client) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&250u32, &collector);
+        let cfg = client.get_protocol_fee().unwrap();
+        assert_eq!(cfg.fee_bps, 250u32);
+        assert_eq!(client.preview_fee(&10_000i128), 250i128);
+        assert_eq!(client.preview_fee(&1_000i128), 25i128);
+    }
+}
+
