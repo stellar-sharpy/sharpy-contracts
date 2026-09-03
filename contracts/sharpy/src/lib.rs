@@ -1239,8 +1239,12 @@ impl SharpyContract {
     /// Point `invoice_id` at `target_invoice` as a pass-through hop.
     pub fn set_route(env: Env, caller: Address, invoice_id: u64, target_invoice: u64) {
         caller.require_auth();
+        assert!(target_invoice != invoice_id, "cannot route to self");
         let _ = load_invoice(&env, invoice_id);
         let _ = load_invoice(&env, target_invoice);
+        if let Some(back) = env.storage().persistent().get::<(Symbol,u64), ComposableRoute>(&route_key(target_invoice)) {
+            assert!(back.target_invoice != invoice_id, "route cycle detected");
+        }
         env.storage().persistent().set(&route_key(invoice_id), &ComposableRoute {
             target_invoice,
             updated_at: env.ledger().timestamp(),
