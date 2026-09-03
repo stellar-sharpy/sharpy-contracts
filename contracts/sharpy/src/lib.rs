@@ -1324,6 +1324,13 @@ impl SharpyContract {
         env.storage().instance().get(&fee_key())
     }
 
+    /// Preview the protocol fee owed on `amount` (pure query, no state change).
+    pub fn preview_fee(env: Env, amount: i128) -> i128 {
+        let fee = calc_protocol_fee(&env, amount);
+        events::fee_previewed(&env, amount, fee);
+        fee
+    }
+
     /// Set the payer whitelist for `invoice_id` (creator-only; empty = open).
     pub fn set_whitelist(env: Env, caller: Address, invoice_id: u64, payers: Vec<Address>) {
         caller.require_auth();
