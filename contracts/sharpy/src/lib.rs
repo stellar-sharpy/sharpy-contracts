@@ -112,6 +112,15 @@ fn require_whitelisted(env: &Env, invoice_id: u64, payer: &Address) {
     }
 }
 
+/// Fee math: `amount * fee_bps / 10_000`, zero when no fee is configured.
+fn calc_protocol_fee(env: &Env, amount: i128) -> i128 {
+    let bps: u32 = env.storage().instance().get::<Symbol, FeeConfig>(&fee_key()).map(|c| c.fee_bps).unwrap_or(0);
+    if bps == 0 || amount <= 0 {
+        return 0;
+    }
+    (amount * (bps as i128) / 10_000i128).max(0i128)
+}
+
 fn index_invoice_for_creator(env: &Env, creator: &Address, invoice_id: u64) {
     let key = creator_index_key(creator);
     let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
