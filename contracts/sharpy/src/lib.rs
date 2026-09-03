@@ -102,6 +102,15 @@ fn bump_counter(env: &Env) -> u64 {
     id
 }
 
+/// Pay-guard: when a whitelist exists and is non-empty, only listed payers pass.
+fn require_whitelisted(env: &Env, invoice_id: u64, payer: &Address) {
+    if let Some(state) = env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id)) {
+        if !state.payers.is_empty() {
+            assert!(state.payers.contains(payer), "payer not whitelisted");
+        }
+    }
+}
+
 fn index_invoice_for_creator(env: &Env, creator: &Address, invoice_id: u64) {
     let key = creator_index_key(creator);
     let mut ids: Vec<u64> = env.storage().persistent().get(&key).unwrap_or_else(|| Vec::new(env));
@@ -306,6 +315,7 @@ impl SharpyContract {
     pub fn pay(env: Env, payer: Address, invoice_id: u64, amount: i128) {
         require_not_paused(&env);
         payer.require_auth();
+        require_whitelisted(&env, invoice_id, &payer);
         assert!(amount > 0, "payment amount must be positive");
 
         let mut invoice = load_invoice(&env, invoice_id);
