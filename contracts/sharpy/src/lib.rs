@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState, ComposableRoute,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState, ComposableRoute, TrancheState,
     SubscriptionParams,
 };
 
@@ -51,6 +51,7 @@ fn invoice_metadata_key(id: u64) -> (Symbol, u64) { (symbol_short!("imeta"), id)
 fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id) }
 fn streaming_key(id: u64) -> (Symbol, u64) { (symbol_short!("strm"), id) }
 fn route_key(id: u64) -> (Symbol, u64) { (symbol_short!("route"), id) }
+fn tranche_key(id: u64) -> (Symbol, u64) { (symbol_short!("tranche"), id) }
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
@@ -1266,6 +1267,19 @@ impl SharpyContract {
         } else {
             invoice_id
         }
+    }
+
+    /// Release a tranche of `bps` basis points; returns cumulative released bps.
+    pub fn release_tranche(env: Env, caller: Address, invoice_id: u64, bps: u32) -> u32 {
+        caller.require_auth();
+        let invoice = load_invoice(&env, invoice_id);
+        assert!(invoice.creator == caller, "only creator can release tranches");
+        let key = tranche_key(invoice_id);
+        let prior: u32 = env.storage().persistent().get::<(Symbol,u64), TrancheState>(&key).map(|s| s.released_bps).unwrap_or(0);
+        let cumulative = prior + bps;
+        env.storage().persistent().set(&key, &TrancheState { released_bps: cumulative, updated_at: env.ledger().timestamp() });
+        events::tranche_released(&env, invoice_id, bps, cumulative);
+        cumulative
     }
 }
 
