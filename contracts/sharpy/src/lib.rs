@@ -1221,6 +1221,19 @@ impl SharpyContract {
         events::streaming_cancelled(&env, invoice_id);
         remaining
     }
+
+    /// Top up stream funding by `additional`.
+    pub fn top_up_stream(env: Env, invoice_id: u64, _recipient: Address, additional: i128) -> i128 {
+        let key = streaming_key(invoice_id);
+        let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
+        assert!(additional > 0, "additional must be positive");
+        state.amount += additional;
+        state.vested = state.vested.min(state.amount);
+        state.updated_at = env.ledger().timestamp();
+        env.storage().persistent().set(&key, &state);
+        events::streaming_topped_up(&env, invoice_id, additional);
+        state.amount
+    }
 }
 
 /// Validates that a token address is not the zero address.
