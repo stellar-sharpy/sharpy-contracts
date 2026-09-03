@@ -3813,3 +3813,79 @@ mod test_archival {
     }
 }
 
+#[cfg(test)]
+mod test_streaming {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::testutils::Ledger as _;
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    #[test]
+    fn test_stream_create_and_full_withdraw() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&1u64, &r, &1000i128, &start, &(start + 1000), &start);
+        env.ledger().set_timestamp(start + 1001);
+        let got = client.withdraw_vested(&1u64, &r);
+        assert_eq!(got, 1000i128);
+    }
+
+    #[test]
+    fn test_stream_cliff_blocks_withdraw() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&2u64, &r, &1000i128, &start, &(start + 1000), &(start + 500));
+        env.ledger().set_timestamp(start + 100);
+        let got = client.withdraw_vested(&2u64, &r);
+        assert_eq!(got, 0i128);
+    }
+
+    #[test]
+    fn test_stream_cancel_returns_remainder() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&3u64, &r, &1000i128, &start, &(start + 1000), &start);
+        let back = client.cancel_stream(&3u64, &r);
+        assert_eq!(back, 1000i128);
+        let again = client.withdraw_vested(&3u64, &r);
+        assert_eq!(again, 0i128);
+    }
+
+    #[test]
+    fn test_stream_top_up_increases_amount() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&4u64, &r, &1000i128, &start, &(start + 1000), &start);
+        let total = client.top_up_stream(&4u64, &r, &500i128);
+        assert_eq!(total, 1500i128);
+        env.ledger().set_timestamp(start + 1001);
+        let got = client.withdraw_vested(&4u64, &r);
+        assert_eq!(got, 1500i128);
+    }
+
+    #[test]
+    fn test_stream_partial_vesting_is_proportional() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&5u64, &r, &1000i128, &start, &(start + 1000), &start);
+        env.ledger().set_timestamp(start + 500);
+        let got = client.withdraw_vested(&5u64, &r);
+        assert_eq!(got, 500i128);
+    }
+}
+

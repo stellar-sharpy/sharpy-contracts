@@ -303,3 +303,27 @@ pub struct ApprovalState {
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct ArchivalState { pub archived: bool, pub at: u64 }
+
+/// Parameters for a streaming/vesting payment schedule.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamingParams {
+    pub recipient: Address,
+    pub amount: i128,
+    pub start_at: u64,
+    pub end_at: u64,
+    pub cliff_at: u64,
+    pub updated_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StreamingState {
+    pub recipient: Address,
+    pub amount: i128,
+    pub start_at: u64,
+    pub end_at: u64,
+    pub cliff_at: u64,
+    pub vested: i128,
+    pub updated_at: u64,
+}

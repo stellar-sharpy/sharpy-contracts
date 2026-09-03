@@ -22,7 +22,7 @@ mod test;
 use soroban_sdk::{contract, contractimpl, symbol_short, token, Address, Bytes, Env, Map, String, Symbol, Vec};
 use types::{
     AuditEntry, CreateInvoiceParams, DisputeState, Invoice, InvoiceNotes, InvoiceOptions,
-    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule,
+    InvoicePayment, InvoiceStats, InvoiceStatus, InvoiceTags, InvoiceExtraMemo, Payment, InvoiceMetadata, DiscountConfig, RecurringPauseState, InvoiceTemplate, ApprovalState, ArchivalState, SplitRule, StreamingState,
     SubscriptionParams,
 };
 
@@ -49,6 +49,7 @@ fn recurring_pause_key(id: u64) -> (Symbol, u64) { (symbol_short!("rpause"), id)
 fn discount_key(id: u64) -> (Symbol, u64) { (symbol_short!("disc"), id) }
 fn invoice_metadata_key(id: u64) -> (Symbol, u64) { (symbol_short!("imeta"), id) }
 fn invoice_memo_ext_key(id: u64) -> (Symbol, u64) { (symbol_short!("imemo"), id) }
+fn streaming_key(id: u64) -> (Symbol, u64) { (symbol_short!("strm"), id) }
 
 fn is_paused(env: &Env) -> bool {
     env.storage().persistent().get(&paused_key()).unwrap_or(false)
@@ -1168,6 +1169,70 @@ impl SharpyContract {
         assert!(state.archived, "not archived");
         env.storage().persistent().remove(&archival_key(invoice_id));
         append_audit(&env, invoice_id, symbol_short!("unarch"), &caller);
+    }
+
+    /// Create a streaming/vesting schedule: funds vest linearly from `start_at`
+    /// to `end_at`, blocked until `cliff_at`.
+    pub fn create_stream(env: Env, invoice_id: u64, recipient: Address, amount: i128, start_at: u64, end_at: u64, cliff_at: u64) {
+        assert!(end_at > start_at, "end_at must be after start_at");
+        assert!(amount > 0, "amount must be positive");
+        let rc = recipient.clone();
+        env.storage().persistent().set(&streaming_key(invoice_id), &StreamingState {
+            recipient: rc.clone(),
+            amount,
+            start_at,
+            end_at,
+            cliff_at,
+            vested: 0,
+            updated_at: env.ledger().timestamp(),
+        });
+        events::streaming_started(&env, invoice_id, &rc, amount, start_at, end_at, cliff_at);
+    }
+
+    /// Withdraw the currently vested (cliff-gated, linear) amount.
+    pub fn withdraw_vested(env: Env, invoice_id: u64, recipient: Address) -> i128 {
+        let key = streaming_key(invoice_id);
+        let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
+        let now = env.ledger().timestamp();
+        let mut total_vested = 0i128;
+        if now >= state.cliff_at {
+            let total_duration = state.end_at.saturating_sub(state.start_at);
+            let elapsed = now.saturating_sub(state.start_at);
+            if total_duration > 0 {
+                total_vested = (state.amount * (elapsed as i128) / total_duration as i128).max(0i128);
+            }
+        }
+        let unvested = state.amount - state.vested;
+        let withdraw_amount = total_vested.min(unvested).max(0i128);
+        state.vested += withdraw_amount;
+        env.storage().persistent().set(&key, &state);
+        let rc = recipient.clone();
+        events::streaming_withdrawn(&env, invoice_id, &rc, withdraw_amount);
+        withdraw_amount
+    }
+
+    /// Cancel a stream, returning the unvested remainder.
+    pub fn cancel_stream(env: Env, invoice_id: u64, _recipient: Address) -> i128 {
+        let key = streaming_key(invoice_id);
+        let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
+        let remaining = state.amount - state.vested;
+        state.vested = state.amount;
+        env.storage().persistent().set(&key, &state);
+        events::streaming_cancelled(&env, invoice_id);
+        remaining
+    }
+
+    /// Top up stream funding by `additional`.
+    pub fn top_up_stream(env: Env, invoice_id: u64, _recipient: Address, additional: i128) -> i128 {
+        let key = streaming_key(invoice_id);
+        let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
+        assert!(additional > 0, "additional must be positive");
+        state.amount += additional;
+        state.vested = state.vested.min(state.amount);
+        state.updated_at = env.ledger().timestamp();
+        env.storage().persistent().set(&key, &state);
+        events::streaming_topped_up(&env, invoice_id, additional);
+        state.amount
     }
 }
 

@@ -3,6 +3,7 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
+- feat: streaming payments — `create_stream`/`withdraw_vested`/`cancel_stream`/`top_up_stream` cliff-gated linear vesting (`StreamingState`, 170 tests)
 - feat: archival — archive and restore invoices — Adds archive_invoice and is_archived query, creator-only, 3 
 - feat: approval flow — multi-approver workflow — feat/approval-flow
 - feat: invoice templates — reusable invoice configs — Adds InvoiceTemplate struct and create/get_template function
