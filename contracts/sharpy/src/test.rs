@@ -4023,5 +4023,24 @@ mod test_tranche {
         assert_eq!(client.release_tranche(&creator, &id, &7500u32), 10_000u32);
         assert_eq!(client.get_released_bps(&id), 10_000u32);
     }
+
+    #[test]
+    #[should_panic(expected = "tranches exceed 100%")]
+    fn test_tranche_over_release_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &id, &9000u32);
+        client.release_tranche(&creator, &id, &2000u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "bps out of range")]
+    fn test_tranche_zero_bps_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &id, &0u32);
+    }
 }
 
