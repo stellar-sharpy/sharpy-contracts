@@ -307,3 +307,17 @@ pub struct InvoiceArchivedEvent { pub invoice_id: u64, pub archiver: Address }
 pub fn invoice_archived(env: &Env, invoice_id: u64, archiver: &Address) {
     env.events().publish((symbol_short!("arch"),), InvoiceArchivedEvent { invoice_id, archiver: archiver.clone() });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamingStartedEvent { pub invoice_id: u64, pub recipient: Address, pub amount: i128, pub start_at: u64, pub end_at: u64, pub cliff_at: u64 }
+pub fn streaming_started(env: &Env, invoice_id: u64, recipient: &Address, amount: i128, start_at: u64, end_at: u64, cliff_at: u64) {
+    env.events().publish((symbol_short!("strm"),), StreamingStartedEvent { invoice_id, recipient: recipient.clone(), amount, start_at, end_at, cliff_at });
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamingWithdrawnEvent { pub invoice_id: u64, pub recipient: Address, pub amount: i128 }
+pub fn streaming_withdrawn(env: &Env, invoice_id: u64, recipient: &Address, amount: i128) {
+    env.events().publish((symbol_short!("wdr"),), StreamingWithdrawnEvent { invoice_id, recipient: recipient.clone(), amount });
+}
