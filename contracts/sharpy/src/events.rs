@@ -321,3 +321,17 @@ pub struct StreamingWithdrawnEvent { pub invoice_id: u64, pub recipient: Address
 pub fn streaming_withdrawn(env: &Env, invoice_id: u64, recipient: &Address, amount: i128) {
     env.events().publish((symbol_short!("wdr"),), StreamingWithdrawnEvent { invoice_id, recipient: recipient.clone(), amount });
 }
+
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamingCancelledEvent { pub invoice_id: u64 }
+pub fn streaming_cancelled(env: &Env, invoice_id: u64) {
+    env.events().publish((symbol_short!("cncl"),), StreamingCancelledEvent { invoice_id });
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamingToppedUpEvent { pub invoice_id: u64, pub amount: i128 }
+pub fn streaming_topped_up(env: &Env, invoice_id: u64, amount: i128) {
+    env.events().publish((symbol_short!("tup"),), StreamingToppedUpEvent { invoice_id, amount });
+}
