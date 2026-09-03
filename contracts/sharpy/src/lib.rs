@@ -1274,9 +1274,11 @@ impl SharpyContract {
         caller.require_auth();
         let invoice = load_invoice(&env, invoice_id);
         assert!(invoice.creator == caller, "only creator can release tranches");
+        assert!(bps > 0 && bps <= 10_000, "bps out of range");
         let key = tranche_key(invoice_id);
         let prior: u32 = env.storage().persistent().get::<(Symbol,u64), TrancheState>(&key).map(|s| s.released_bps).unwrap_or(0);
         let cumulative = prior + bps;
+        assert!(cumulative <= 10_000, "tranches exceed 100%");
         env.storage().persistent().set(&key, &TrancheState { released_bps: cumulative, updated_at: env.ledger().timestamp() });
         events::tranche_released(&env, invoice_id, bps, cumulative);
         cumulative
