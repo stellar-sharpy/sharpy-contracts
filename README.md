@@ -18,8 +18,8 @@ Soroban smart contract powering the Sharpy split payment protocol on Stellar. Ha
 
 | Network | Contract ID | Status |
 |---------|-------------|--------|
-| Testnet | `CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T` | ✅ Live (2026-09-04, 184-test build) |
-| Mainnet | Coming soon | ⏳ Pending |
+| Testnet | `CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T` | Live (2026-09-04, 184-test build) |
+| Mainnet | Coming soon | Pending |
 
 - [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T)
 - [Frontend dApp](https://sharpy-sigma.vercel.app)
@@ -185,7 +185,7 @@ sharpy-contracts/
 │       ├── lib.rs                   # All contract logic (600+ lines)
 │       ├── types.rs                 # Invoice, SplitRule, AuditEntry, etc.
 │       ├── events.rs                # Structured event helpers
-│       └── test.rs                  # 129 unit tests (+7 features + 12 test PRs 2026-08-28)
+│       └── test.rs                  # 184 unit tests (streaming, routing, tranche, whitelist, fee-module)
 └── .github/
     ├── workflows/ci.yml             # Test + WASM build on every PR
     └── ISSUE_TEMPLATE/              # Bug report, feature request
@@ -196,7 +196,7 @@ sharpy-contracts/
 ## Build & Test
 
 ```bash
-make test           # cargo test (129 passing)
+make test           # cargo test (184 passing)
 make build          # build WASM
 make optimize       # optimize WASM with stellar contract optimize
 make deploy-testnet # deploy to testnet
@@ -209,7 +209,7 @@ make deploy-mainnet # deploy to mainnet
 
 | soroban-sdk | Protocol | Status |
 |-------------|----------|--------|
-| 26.1.0 | 27 | ✅ Current |
+| 26.1.0 | 27 | Current |
 
 ---
 
