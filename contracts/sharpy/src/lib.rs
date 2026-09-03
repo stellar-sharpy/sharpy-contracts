@@ -1188,6 +1188,28 @@ impl SharpyContract {
         });
         events::streaming_started(&env, invoice_id, &rc, amount, start_at, end_at, cliff_at);
     }
+
+    /// Withdraw the currently vested (cliff-gated, linear) amount.
+    pub fn withdraw_vested(env: Env, invoice_id: u64, recipient: Address) -> i128 {
+        let key = streaming_key(invoice_id);
+        let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
+        let now = env.ledger().timestamp();
+        let mut total_vested = 0i128;
+        if now >= state.cliff_at {
+            let total_duration = state.end_at.saturating_sub(state.start_at);
+            let elapsed = now.saturating_sub(state.start_at);
+            if total_duration > 0 {
+                total_vested = (state.amount * (elapsed as i128) / total_duration as i128).max(0i128);
+            }
+        }
+        let unvested = state.amount - state.vested;
+        let withdraw_amount = total_vested.min(unvested).max(0i128);
+        state.vested += withdraw_amount;
+        env.storage().persistent().set(&key, &state);
+        let rc = recipient.clone();
+        events::streaming_withdrawn(&env, invoice_id, &rc, withdraw_amount);
+        withdraw_amount
+    }
 }
 
 /// Validates that a token address is not the zero address.
