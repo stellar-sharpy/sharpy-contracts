@@ -5091,3 +5091,94 @@ mod test_edge_tranche {
         client.release_tranche(&other, &id, &1_000u32);
     }
 }
+
+#[cfg(test)]
+mod test_edge_whitelist {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [100i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_empty_whitelist_is_open() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        assert!(client.get_whitelist(&id).is_none());
+        client.set_whitelist(&creator, &id, &Vec::new(&env));
+        let state = client.get_whitelist(&id).unwrap();
+        assert_eq!(state.payers.len(), 0);
+    }
+
+    #[test]
+    fn test_add_payer_is_idempotent() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.add_whitelisted_payer(&creator, &id, &payer);
+        client.add_whitelisted_payer(&creator, &id, &payer);
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_last_payer_leaves_empty_list() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.add_whitelisted_payer(&creator, &id, &payer);
+        client.remove_whitelisted_payer(&creator, &id, &payer);
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "no whitelist")]
+    fn test_remove_without_whitelist_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.remove_whitelisted_payer(&creator, &id, &payer);
+    }
+
+    #[test]
+    #[should_panic(expected = "only creator can set whitelist")]
+    fn test_non_creator_set_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let other = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.set_whitelist(&other, &id, &Vec::new(&env));
+    }
+}
