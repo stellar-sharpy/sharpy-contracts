@@ -3,9 +3,6 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
-- feat: protocol fee — `set/get_protocol_fee` + `preview_fee` bps cut (`FeeConfig`, 184 tests)
-- feat: whitelist gating — `set/get_whitelist` + add/remove enforced in `pay` (`WhitelistState`, 181 tests)
-- feat: tranche release — `release_tranche`/`get_released_bps` partial release in bps (`TrancheState`, 178 tests)
 - feat: archival — archive and restore invoices — Adds archive_invoice and is_archived query, creator-only, 3 
 - feat: approval flow — multi-approver workflow — feat/approval-flow
 - feat: invoice templates — reusable invoice configs — Adds InvoiceTemplate struct and create/get_template function
@@ -20,6 +17,9 @@ All notable changes to the Sharpy smart contract are documented here.
 ## [0.3.0]
 - feat: streaming payments — `create_stream`/`withdraw_vested`/`cancel_stream`/`top_up_stream` cliff-gated linear vesting (`StreamingState`, 170 tests)
 - feat: composable routing — `set_route`/`get_route`/`resolve_route` pass-through hop (`ComposableRoute`, 174 tests)
+- feat: tranche release — `release_tranche`/`get_released_bps` partial release in bps (`TrancheState`, 178 tests)
+- feat: whitelist gating — `set/get_whitelist` + add/remove enforced in `pay` (`WhitelistState`, 181 tests)
+- feat: protocol fee — `set/get_protocol_fee` + `preview_fee` bps cut (`FeeConfig`, 184 tests)
 
 ### Added
 - `get_invoice_version(id)` — returns invoice schema version (always 1) — `feat/get-invoice-version` + test PR #142
