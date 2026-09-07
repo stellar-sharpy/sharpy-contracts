@@ -211,6 +211,9 @@ make deploy-mainnet # deploy to mainnet
 |-------------|----------|--------|
 | 26.1.0 | 27 | Current |
 
+Crate `sharpy` is 0.3.0 (`contracts/sharpy/Cargo.toml`). On-chain schema versions are
+independent: `get_contract_version()` returns 1 and `get_invoice_version(id)` returns 1.
+
 ---
 
 ## Related Repos
