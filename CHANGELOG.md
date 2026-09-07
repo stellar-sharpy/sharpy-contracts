@@ -4,6 +4,7 @@ All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
 - feat(events): invoice_updated (`inv_upd`) now emitted on `set_discount` and all whitelist mutations (`set/add/remove`), after the field-specific event; `is_invoice_expired(id)` read-only helper mirrors the `refund`/`refund_batch` expiry trigger — feat/event-taxonomy (closes #183)
+- feat(contract): `get_creator_invoices_paged(creator, limit, offset)` + `get_payer_invoices_paged(payer, limit, offset)` with total bounds guards (limit 0 / offset past end yield empty pages); unpaginated index queries unchanged — feat/index-pagination (closes #184)
 
 ## [0.3.0] - 2026-09-04
 - feat: streaming payments — `create_stream`/`withdraw_vested`/`cancel_stream`/`top_up_stream` cliff-gated linear vesting (`StreamingState`, 170 tests)

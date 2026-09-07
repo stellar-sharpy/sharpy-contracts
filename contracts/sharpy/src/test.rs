@@ -4325,3 +4325,225 @@ mod test_event_taxonomy_expired {
     }
 }
 
+#[cfg(test)]
+mod test_index_pagination_creator {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [100i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_creator_first_page_returns_head() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        let _id3 = mk(&env, &client, &creator);
+        let page = client.get_creator_invoices_paged(&creator, &2u32, &0u32);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page.get(0).unwrap(), id1);
+        assert_eq!(page.get(1).unwrap(), id2);
+        // Full index is unchanged
+        assert_eq!(client.get_invoices_by_creator(&creator).len(), 3);
+    }
+
+    #[test]
+    fn test_creator_offset_skips_head() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let _id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        let id3 = mk(&env, &client, &creator);
+        let page = client.get_creator_invoices_paged(&creator, &10u32, &1u32);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page.get(0).unwrap(), id2);
+        assert_eq!(page.get(1).unwrap(), id3);
+    }
+}
+
+#[cfg(test)]
+mod test_index_pagination_bounds {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [100i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_limit_zero_returns_empty_page() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let _id = mk(&env, &client, &creator);
+        assert!(client.get_creator_invoices_paged(&creator, &0u32, &0u32).is_empty());
+        assert!(client.get_payer_invoices_paged(&creator, &0u32, &0u32).is_empty());
+    }
+
+    #[test]
+    fn test_offset_past_end_returns_empty_page() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let _id = mk(&env, &client, &creator);
+        assert!(client.get_creator_invoices_paged(&creator, &10u32, &5u32).is_empty());
+        assert!(client.get_creator_invoices_paged(&creator, &10u32, &1u32).is_empty());
+    }
+
+    #[test]
+    fn test_limit_truncates_to_remainder() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        let page = client.get_creator_invoices_paged(&creator, &100u32, &1u32);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page.get(0).unwrap(), id2);
+        let _ = id1;
+    }
+
+    #[test]
+    fn test_unknown_creator_returns_empty_page() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let _id = mk(&env, &client, &creator);
+        assert!(client.get_creator_invoices_paged(&stranger, &10u32, &0u32).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod test_index_pagination_payer {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk_paid(env: &Env, client: &SharpyContractClient<'_>, creator: &Address, payer: &Address, tok: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [1000i128]),
+            &Vec::from_array(env, [tok.clone()]),
+            &dl,
+            &opts,
+        );
+        client.pay(payer, &id, &100i128);
+        id
+    }
+
+    #[test]
+    fn test_payer_pages_follow_payment_order() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin);
+        token::StellarAssetClient::new(&env, &tok).mint(&payer, &10_000i128);
+        let id1 = mk_paid(&env, &client, &creator, &payer, &tok);
+        let id2 = mk_paid(&env, &client, &creator, &payer, &tok);
+        let id3 = mk_paid(&env, &client, &creator, &payer, &tok);
+        let p1 = client.get_payer_invoices_paged(&payer, &2u32, &0u32);
+        assert_eq!(p1.len(), 2);
+        assert_eq!(p1.get(0).unwrap(), id1);
+        assert_eq!(p1.get(1).unwrap(), id2);
+        let p2 = client.get_payer_invoices_paged(&payer, &2u32, &2u32);
+        assert_eq!(p2.len(), 1);
+        assert_eq!(p2.get(0).unwrap(), id3);
+        // Full index is unchanged
+        assert_eq!(client.get_invoices_by_payer(&payer).len(), 3);
+    }
+
+    #[test]
+    fn test_payer_pages_are_isolated_per_payer() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer_a = Address::generate(&env);
+        let payer_b = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin);
+        token::StellarAssetClient::new(&env, &tok).mint(&payer_a, &10_000i128);
+        token::StellarAssetClient::new(&env, &tok).mint(&payer_b, &10_000i128);
+        let id_a = mk_paid(&env, &client, &creator, &payer_a, &tok);
+        let _id_b = mk_paid(&env, &client, &creator, &payer_b, &tok);
+        let page = client.get_payer_invoices_paged(&payer_a, &10u32, &0u32);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page.get(0).unwrap(), id_a);
+        assert!(client.get_payer_invoices_paged(&payer_b, &1u32, &1u32).is_empty());
+    }
+}
+
