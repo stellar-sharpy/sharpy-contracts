@@ -1104,6 +1104,7 @@ impl SharpyContract {
         env.storage().persistent().extend_ttl(&discount_key(invoice_id), 100_000, 6_307_200);
         append_audit(&env, invoice_id, symbol_short!("disc"), &caller);
         events::discount_updated(&env, invoice_id, discount_bps);
+        events::invoice_updated(&env, invoice_id, &caller);
     }
     pub fn get_discount(env: Env, invoice_id: u64) -> Option<DiscountConfig> {
         env.storage().persistent().get(&discount_key(invoice_id))
