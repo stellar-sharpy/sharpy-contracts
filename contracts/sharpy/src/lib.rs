@@ -710,6 +710,22 @@ impl SharpyContract {
         env.storage().persistent().extend_ttl(&invoice_key(invoice_id), 100_000, 6_307_200);
     }
 
+    /// Seconds until `deadline` for a Pending invoice — 0 when expired or terminal.
+    /// Pure observability view (no state change, no events) for long-lived invoice
+    /// dashboards: poll alongside `is_invoice_expired` and submit `bump_invoice_ttl`
+    /// (storage keep-alive) or `extend_deadline` (push the deadline out) while the
+    /// hint is still comfortably positive. Terminal invoices return 0 — nothing to bump.
+    /// Pairs with `is_invoice_expired`: `get_ttl_hint(id) == 0` on a Pending invoice
+    /// means the deadline has passed and `refund` is submittable; on a terminal
+    /// invoice it simply means no further action is needed.
+    pub fn get_ttl_hint(env: Env, invoice_id: u64) -> u64 {
+        let invoice = load_invoice(&env, invoice_id);
+        if invoice.status != InvoiceStatus::Pending {
+            return 0;
+        }
+        invoice.deadline.saturating_sub(env.ledger().timestamp())
+    }
+
     /// Returns the exact per-recipient payout amounts for a given payment amount,
     /// using the same proportional and dust logic as `_release`.
     /// Pure read — no state is modified.
@@ -1387,6 +1403,20 @@ impl SharpyContract {
         let fee = calc_protocol_fee(&env, amount);
         events::fee_previewed(&env, amount, fee);
         fee
+    }
+
+    /// Preview the protocol fee owed on an invoice's full target total.
+    /// Sums `amounts` and applies the current fee config — pure view, no state
+    /// change and no events. Call before `pay` so signers see the fee estimate
+    /// up front. Returns 0 when no fee is configured.
+    /// Consistency: equals `preview_fee(invoice_total)` for the same total, minus
+    /// the `fee_previewed` event — use this variant when the caller already holds
+    /// an invoice id and wants a silent estimate. Release-path math is untouched:
+    /// this helper only READS `calc_protocol_fee` and never deducts.
+    pub fn preview_fee_for_invoice(env: Env, invoice_id: u64) -> i128 {
+        let invoice = load_invoice(&env, invoice_id);
+        let total: i128 = invoice.amounts.iter().sum();
+        calc_protocol_fee(&env, total)
     }
 
     /// Set the payer whitelist for `invoice_id` (creator-only; empty = open).
