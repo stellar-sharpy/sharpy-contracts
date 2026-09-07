@@ -110,8 +110,28 @@ All events use single-element topic `symbol_short!`.
 | `claimed` | `AccountBalanceClaimedEvent{account, token, amount}` | `claim` |
 | `cancel` | `InvoiceCancelledEvent{invoice_id, creator, refunded_amount}` | `cancel_invoice` |
 | `esc_fund` | `EscrowFundedEvent{invoice_id, release_at, funded}` | `pay`/`pool_pay` full funding with escrow |
-
-Future: `invoice_updated` and `invoice_expired` are defined for mutation/expiry paths (see events.rs).
+| `inv_upd` | `InvoiceUpdatedEvent{invoice_id, updater, timestamp}` | `freeze`/`unfreeze`, `set_invoice_notes`, `set_invoice_tags`, `set_invoice_memo_ext`, `extend_deadline`, `set_invoice_metadata` |
+| `expired` | `InvoiceExpiredEvent{invoice_id, deadline, funded}` | `refund`, `refund_batch` (per deadline-passed invoice) |
+| `tags` | `InvoiceTagsUpdatedEvent{invoice_id, updater, tag_count}` | `set_invoice_tags` |
+| `memo` | `InvoiceMemoExtUpdatedEvent{invoice_id, updater}` | `set_invoice_memo_ext` |
+| `ext_dead` | `DeadlineExtendedEvent{invoice_id, old_deadline, new_deadline}` | `extend_deadline` |
+| `imeta` | `InvoiceMetadataUpdatedEvent{invoice_id, updater}` | `set_invoice_metadata` |
+| `disc` | `DiscountUpdatedEvent{invoice_id, discount_bps}` | `set_discount` |
+| `rpause` | `RecurringPausedEvent{invoice_id, paused}` | `pause_recurring`/`resume_recurring` |
+| `tmpl` | `TemplateCreatedEvent{template_id, creator}` | `create_template` |
+| `appr` | `InvoiceApprovedEvent{invoice_id, approver}` | `set_approval_config`/`approve_invoice` |
+| `arch` | `InvoiceArchivedEvent{invoice_id, archiver}` | `archive_invoice` |
+| `strm` | `StreamingStartedEvent{invoice_id, recipient, amount, start_at, end_at, cliff_at}` | `create_stream` |
+| `wdr` | `StreamingWithdrawnEvent{invoice_id, recipient, amount}` | `withdraw_vested` |
+| `cncl` | `StreamingCancelledEvent{invoice_id}` | `cancel_stream` |
+| `tup` | `StreamingToppedUpEvent{invoice_id, amount}` | `top_up_stream` |
+| `route` | `RouteSetEvent{invoice_id, target_invoice}` | `set_route` |
+| `rslv` | `RouteResolvedEvent{invoice_id, target_invoice}` | `resolve_route` |
+| `tranch` | `TrancheReleasedEvent{invoice_id, bps, cumulative_bps}` | `release_tranche` |
+| `wlist` | `WhitelistSetEvent{invoice_id, payer_count}` | `set_whitelist`/`add_whitelisted_payer` |
+| `wrem` | `WhitelistPayerRemovedEvent{invoice_id, payer}` | `remove_whitelisted_payer` |
+| `fee` | `FeeConfiguredEvent{fee_bps, collector}` | `set_protocol_fee` |
+| `fprev` | `FeePreviewedEvent{amount, fee}` | `preview_fee` |
 
 ## Checked Arithmetic (CAP-82)
 
