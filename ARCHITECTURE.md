@@ -4,7 +4,8 @@ This document explains internal storage layout, state machines, recurring flow, 
 
 ## Storage Key Reference
 
-All persistent/instance keys are derived via `symbol_short!` (max 9 chars) + typed tuples.
+All keys are derived via `symbol_short!` (max 9 chars). Singleton config (`admin`, `treasury`, `fee`) lives in
+instance storage (no TTL); every per-invoice entry plus the counters lives in persistent storage as typed tuples.
 
 | Key Symbol | Type | Storage | Description |
 |------------|------|---------|-------------|
@@ -21,8 +22,26 @@ All persistent/instance keys are derived via `symbol_short!` (max 9 chars) + typ
 | `("by_pyr", payer)` | `Vec<u64>` | persistent | Payer index |
 | `("acc_bal", account, token)` | `i128` | persistent | Claimable fallback balance |
 | `("notes", id)` | `InvoiceNotes` | persistent | Free-text notes |
+| `("itags", id)` | `InvoiceTags` | persistent | Categorized tags via `set/get_invoice_tags` |
+| `("arch", id)` | `ArchivalState` | persistent | Terminal archive flag via `archive/unarchive/is_archived` |
+| `("appr", id)` | `ApprovalState` | persistent | Multi-approver config via `set_approval_config`/`approve_invoice` |
+| `("tmpl", template_id)` | `InvoiceTemplate` | persistent | Reusable configs via `create_template`/`get_template` |
+| `tmpl_ctr` | `u64` | persistent | Global template ID counter |
+| `("rpause", id)` | `RecurringPauseState` | persistent | Recurring-chain pause via `pause/resume_recurring` |
+| `("disc", id)` | `DiscountConfig` | persistent | Discount bps via `set/get_discount` |
+| `("imeta", id)` | `InvoiceMetadata` | persistent | Key-value entries via `set/get_invoice_metadata` |
+| `("imemo", id)` | `InvoiceExtraMemo` | persistent | 256-char memo via `set/get_invoice_memo_ext` |
+| `("strm", id)` | `StreamingState` | persistent | Cliff-gated vesting via `create_stream`/`withdraw_vested`/`cancel_stream`/`top_up_stream` |
+| `("route", id)` | `ComposableRoute` | persistent | Pass-through hop via `set/get/resolve_route` |
+| `("tranche", id)` | `TrancheState` | persistent | Partial-release accounting via `release_tranche`/`get_released_bps` |
+| `("wlist", id)` | `WhitelistState` | persistent | Payer allowlist enforced in `pay` via `set/get/add/remove_whitelisted_payer` |
+| `fee` | `FeeConfig` | instance | Protocol fee bps + collector via `set/get_protocol_fee`/`preview_fee` |
 
-TTL extension: every `save_invoice` and index/balance write calls `extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
+TTL extension: `save_invoice`, creator/payer index writes, `credit_account`, `bump_invoice_ttl`, `set_invoice_notes`,
+`set_invoice_tags`, `set_invoice_memo_ext`, `set_invoice_metadata` and `set_discount` call
+`extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
+Instance singletons (`admin`, `treasury`, `fee`) carry no TTL; escrow, recurring, pause, approval, archival,
+streaming, route, tranche, whitelist and template writes ride on the invoice/index entries above.
 
 ## Invoice Lifecycle State Machine
 
@@ -76,7 +95,7 @@ Guards: `dispute_release` requires `timestamp < release_at` and creator auth; `r
 
 - Soroban persistent entries expire. Sharpy extends TTL on every write using `extend_ttl(min=100k, max=6.3M)`.
 - `bump_invoice_ttl(id)` is a manual keep-alive for long-lived invoices.
-- Invoked in: `save_invoice`, index updates, `credit_account`, `set_invoice_notes`, and explicit bump.
+- Invoked in: `save_invoice`, creator/payer index updates, `credit_account`, `set_invoice_notes`, `set_invoice_tags`, `set_invoice_memo_ext`, `set_invoice_metadata`, `set_discount`, and explicit bump.
 
 ## Event Taxonomy
 
@@ -95,8 +114,28 @@ All events use single-element topic `symbol_short!`.
 | `claimed` | `AccountBalanceClaimedEvent{account, token, amount}` | `claim` |
 | `cancel` | `InvoiceCancelledEvent{invoice_id, creator, refunded_amount}` | `cancel_invoice` |
 | `esc_fund` | `EscrowFundedEvent{invoice_id, release_at, funded}` | `pay`/`pool_pay` full funding with escrow |
-
-Future: `invoice_updated` and `invoice_expired` are defined for mutation/expiry paths (see events.rs).
+| `inv_upd` | `InvoiceUpdatedEvent{invoice_id, updater, timestamp}` | `freeze`/`unfreeze`, `set_invoice_notes`, `set_invoice_tags`, `set_invoice_memo_ext`, `extend_deadline`, `set_invoice_metadata` |
+| `expired` | `InvoiceExpiredEvent{invoice_id, deadline, funded}` | `refund`, `refund_batch` (per deadline-passed invoice) |
+| `tags` | `InvoiceTagsUpdatedEvent{invoice_id, updater, tag_count}` | `set_invoice_tags` |
+| `memo` | `InvoiceMemoExtUpdatedEvent{invoice_id, updater}` | `set_invoice_memo_ext` |
+| `ext_dead` | `DeadlineExtendedEvent{invoice_id, old_deadline, new_deadline}` | `extend_deadline` |
+| `imeta` | `InvoiceMetadataUpdatedEvent{invoice_id, updater}` | `set_invoice_metadata` |
+| `disc` | `DiscountUpdatedEvent{invoice_id, discount_bps}` | `set_discount` |
+| `rpause` | `RecurringPausedEvent{invoice_id, paused}` | `pause_recurring`/`resume_recurring` |
+| `tmpl` | `TemplateCreatedEvent{template_id, creator}` | `create_template` |
+| `appr` | `InvoiceApprovedEvent{invoice_id, approver}` | `set_approval_config`/`approve_invoice` |
+| `arch` | `InvoiceArchivedEvent{invoice_id, archiver}` | `archive_invoice` |
+| `strm` | `StreamingStartedEvent{invoice_id, recipient, amount, start_at, end_at, cliff_at}` | `create_stream` |
+| `wdr` | `StreamingWithdrawnEvent{invoice_id, recipient, amount}` | `withdraw_vested` |
+| `cncl` | `StreamingCancelledEvent{invoice_id}` | `cancel_stream` |
+| `tup` | `StreamingToppedUpEvent{invoice_id, amount}` | `top_up_stream` |
+| `route` | `RouteSetEvent{invoice_id, target_invoice}` | `set_route` |
+| `rslv` | `RouteResolvedEvent{invoice_id, target_invoice}` | `resolve_route` |
+| `tranch` | `TrancheReleasedEvent{invoice_id, bps, cumulative_bps}` | `release_tranche` |
+| `wlist` | `WhitelistSetEvent{invoice_id, payer_count}` | `set_whitelist`/`add_whitelisted_payer` |
+| `wrem` | `WhitelistPayerRemovedEvent{invoice_id, payer}` | `remove_whitelisted_payer` |
+| `fee` | `FeeConfiguredEvent{fee_bps, collector}` | `set_protocol_fee` |
+| `fprev` | `FeePreviewedEvent{amount, fee}` | `preview_fee` |
 
 ## Checked Arithmetic (CAP-82)
 
@@ -113,4 +152,4 @@ All payout math uses `checked_mul`/`checked_div`/`checked_add`/`checked_sub` to 
 - `contracts/sharpy/src/lib.rs` — contract impl, storage helpers, `SharpyContract`
 - `contracts/sharpy/src/events.rs` — typed event helpers
 - `contracts/sharpy/src/types.rs` — `Invoice`, `SplitRule`, `DisputeState`, etc.
-- `contracts/sharpy/src/test.rs` — 120+ unit/integration tests
+- `contracts/sharpy/src/test.rs` — 184 unit/integration tests
