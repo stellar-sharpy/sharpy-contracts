@@ -37,7 +37,11 @@ instance storage (no TTL); every per-invoice entry plus the counters lives in pe
 | `("wlist", id)` | `WhitelistState` | persistent | Payer allowlist enforced in `pay` via `set/get/add/remove_whitelisted_payer` |
 | `fee` | `FeeConfig` | instance | Protocol fee bps + collector via `set/get_protocol_fee`/`preview_fee` |
 
-TTL extension: every `save_invoice` and index/balance write calls `extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
+TTL extension: `save_invoice`, creator/payer index writes, `credit_account`, `bump_invoice_ttl`, `set_invoice_notes`,
+`set_invoice_tags`, `set_invoice_memo_ext`, `set_invoice_metadata` and `set_discount` call
+`extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
+Instance singletons (`admin`, `treasury`, `fee`) carry no TTL; escrow, recurring, pause, approval, archival,
+streaming, route, tranche, whitelist and template writes ride on the invoice/index entries above.
 
 ## Invoice Lifecycle State Machine
 
@@ -91,7 +95,7 @@ Guards: `dispute_release` requires `timestamp < release_at` and creator auth; `r
 
 - Soroban persistent entries expire. Sharpy extends TTL on every write using `extend_ttl(min=100k, max=6.3M)`.
 - `bump_invoice_ttl(id)` is a manual keep-alive for long-lived invoices.
-- Invoked in: `save_invoice`, index updates, `credit_account`, `set_invoice_notes`, and explicit bump.
+- Invoked in: `save_invoice`, creator/payer index updates, `credit_account`, `set_invoice_notes`, `set_invoice_tags`, `set_invoice_memo_ext`, `set_invoice_metadata`, `set_discount`, and explicit bump.
 
 ## Event Taxonomy
 
