@@ -1061,6 +1061,15 @@ impl SharpyContract {
         count
     }
 
+    /// Read-only deadline-expiry check mirroring the `refund`/`refund_batch` trigger.
+    /// Returns true only when the invoice is still Pending and `timestamp > deadline`.
+    /// Pure view — emits no events. Indexers and UIs should poll this to decide
+    /// when to submit `refund`; the `expired` event fires on the refund itself.
+    pub fn is_invoice_expired(env: Env, invoice_id: u64) -> bool {
+        let invoice = load_invoice(&env, invoice_id);
+        invoice.status == InvoiceStatus::Pending && env.ledger().timestamp() > invoice.deadline
+    }
+
     /// Extend invoice deadline — creator only, only Pending, new_deadline must be > old and > now.
     pub fn extend_deadline(env: Env, caller: Address, invoice_id: u64, new_deadline: u64) {
         require_not_paused(&env);
@@ -1104,6 +1113,7 @@ impl SharpyContract {
         env.storage().persistent().extend_ttl(&discount_key(invoice_id), 100_000, 6_307_200);
         append_audit(&env, invoice_id, symbol_short!("disc"), &caller);
         events::discount_updated(&env, invoice_id, discount_bps);
+        events::invoice_updated(&env, invoice_id, &caller);
     }
     pub fn get_discount(env: Env, invoice_id: u64) -> Option<DiscountConfig> {
         env.storage().persistent().get(&discount_key(invoice_id))
@@ -1342,6 +1352,7 @@ impl SharpyContract {
             updated_at: env.ledger().timestamp(),
         });
         events::whitelist_set(&env, invoice_id, count);
+        events::invoice_updated(&env, invoice_id, &caller);
     }
 
     /// Return the payer whitelist for `invoice_id`, if any.
@@ -1362,6 +1373,7 @@ impl SharpyContract {
         let count = state.payers.len();
         env.storage().persistent().set(&whitelist_key(invoice_id), &state);
         events::whitelist_set(&env, invoice_id, count);
+        events::invoice_updated(&env, invoice_id, &caller);
     }
 
     /// Remove one payer from the whitelist (creator-only).
@@ -1381,6 +1393,7 @@ impl SharpyContract {
         state.updated_at = env.ledger().timestamp();
         env.storage().persistent().set(&whitelist_key(invoice_id), &state);
         events::whitelist_payer_removed(&env, invoice_id, &rc);
+        events::invoice_updated(&env, invoice_id, &caller);
     }
 }
 

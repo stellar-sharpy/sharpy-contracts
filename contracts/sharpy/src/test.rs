@@ -4196,3 +4196,132 @@ mod test_fee {
     }
 }
 
+#[cfg(test)]
+mod test_event_taxonomy_updated {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [1000i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_discount_mutation_is_audited() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.set_discount(&creator, &id, &250u32);
+        assert_eq!(client.get_discount(&id).unwrap().discount_bps, 250u32);
+        let log = client.get_audit_log(&id);
+        assert!(log.iter().any(|e| e.action == soroban_sdk::symbol_short!("disc")));
+    }
+
+    #[test]
+    fn test_whitelist_mutations_update_state() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer_a = Address::generate(&env);
+        let payer_b = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.set_whitelist(&creator, &id, &Vec::from_array(&env, [payer_a.clone()]));
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 1);
+        client.add_whitelisted_payer(&creator, &id, &payer_b);
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 2);
+        client.remove_whitelisted_payer(&creator, &id, &payer_a);
+        let wl = client.get_whitelist(&id).unwrap();
+        assert_eq!(wl.payers.len(), 1);
+        assert_eq!(wl.payers.get(0).unwrap(), payer_b);
+    }
+}
+
+#[cfg(test)]
+mod test_event_taxonomy_expired {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env, Vec};
+    use crate::{types::InvoiceStatus, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address, deadline: u64) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [1000i128]),
+            &Vec::from_array(env, [tok]),
+            &deadline,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_expiry_helper_tracks_deadline() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let id = mk(&env, &client, &creator, now + 1000);
+        assert!(!client.is_invoice_expired(&id));
+        env.ledger().set_timestamp(now + 1001);
+        assert!(client.is_invoice_expired(&id));
+    }
+
+    #[test]
+    fn test_refund_marks_expired_invoice_refunded() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let id = mk(&env, &client, &creator, now + 1000);
+        env.ledger().set_timestamp(now + 1001);
+        assert!(client.is_invoice_expired(&id));
+        client.refund(&id);
+        assert_eq!(client.get_invoice(&id).status, InvoiceStatus::Refunded);
+        assert!(!client.is_invoice_expired(&id));
+        let log = client.get_audit_log(&id);
+        assert!(log.iter().any(|e| e.action == soroban_sdk::symbol_short!("refund")));
+    }
+}
+
