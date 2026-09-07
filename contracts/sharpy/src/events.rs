@@ -185,8 +185,14 @@ pub fn payment_indexed(env: &Env, payer: &Address, invoice_id: u64) {
 }
 
 /// Payload for the `inv_upd` (invoice updated) event — emitted when mutable invoice fields are changed.
-/// Immutable fields: `creator`, `recipients`, `amounts`, `tokens`, `deadline` (commit at creation).
-/// Mutable fields: `frozen`, `notes`, `escrow_release_delay` (future), `arbitrator` (future).
+/// Taxonomy (Phase 2.2): one generic mutation signal across all `set_*` mutators
+/// (notes, tags, memo, metadata, discount, whitelist) plus lifecycle toggles
+/// (freeze/unfreeze, deadline extension). Field-specific events (`tags`, `memo`,
+/// `imeta`, `disc`, `wlist`) fire first; `inv_upd` always follows so indexers
+/// can subscribe to a single topic for cache invalidation.
+/// Immutable fields never emit `inv_upd`: `creator`, `recipients`, `amounts`,
+/// `tokens` (commit at creation; `deadline` moves only via `extend_deadline`,
+/// which still emits `inv_upd` alongside `ext_dead`).
 #[contracttype]
 #[derive(Clone)]
 pub struct InvoiceUpdatedEvent {
@@ -196,7 +202,9 @@ pub struct InvoiceUpdatedEvent {
 }
 
 /// Emits the `inv_upd` event. Topic: `("inv_upd",)`.
-/// Fired on any state-mutating invoice update (freeze/unfreeze, notes, future mutators).
+/// Fired on any state-mutating invoice update: freeze/unfreeze, notes, tags,
+/// memo, metadata, discount, whitelist, and deadline extension. Always emitted
+/// AFTER the field-specific event so per-field subscribers see their event first.
 pub fn invoice_updated(env: &Env, invoice_id: u64, updater: &Address) {
     env.events().publish(
         (symbol_short!("inv_upd"),),
@@ -205,6 +213,10 @@ pub fn invoice_updated(env: &Env, invoice_id: u64, updater: &Address) {
 }
 
 /// Payload for the `expired` (invoice expired) event — emitted when deadline passes and refund() is called.
+/// Taxonomy (Phase 2.2): `expired` marks the deadline trigger; `refunded` marks the
+/// fund movement. Both fire on every deadline-expiry path (`refund`, `refund_batch`)
+/// with `expired` first. Dispute refunds emit only `refunded` (no `expired`) so
+/// indexers can distinguish deadline expiry from arbitrator resolution.
 /// Distinct from `refunded` to let indexers distinguish manual expiry from dispute refunds.
 #[contracttype]
 #[derive(Clone)]
@@ -215,7 +227,9 @@ pub struct InvoiceExpiredEvent {
 }
 
 /// Emits the `expired` event. Topic: `("expired",)`.
-/// Fired in `refund()` when `timestamp > deadline` before transitioning to Refunded.
+/// Fired in `refund()` and `refund_batch()` when `timestamp > deadline`, before
+/// transitioning to Refunded. See `is_invoice_expired` for the read-only check
+/// that mirrors this trigger condition without emitting.
 pub fn invoice_expired(env: &Env, invoice_id: u64, deadline: u64, funded: i128) {
     env.events().publish(
         (symbol_short!("expired"),),
