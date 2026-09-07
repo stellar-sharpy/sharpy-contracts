@@ -4,7 +4,8 @@ This document explains internal storage layout, state machines, recurring flow, 
 
 ## Storage Key Reference
 
-All persistent/instance keys are derived via `symbol_short!` (max 9 chars) + typed tuples.
+All keys are derived via `symbol_short!` (max 9 chars). Singleton config (`admin`, `treasury`, `fee`) lives in
+instance storage (no TTL); every per-invoice entry plus the counters lives in persistent storage as typed tuples.
 
 | Key Symbol | Type | Storage | Description |
 |------------|------|---------|-------------|
