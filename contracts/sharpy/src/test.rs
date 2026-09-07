@@ -4863,3 +4863,70 @@ mod test_audit_hardening {
     }
 }
 
+#[cfg(test)]
+mod test_edge_streaming_cliff {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    #[test]
+    fn test_withdraw_one_ledger_before_cliff_yields_zero() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&501u64, &r, &1000i128, &start, &(start + 1000), &(start + 500));
+        env.ledger().set_timestamp(start + 499);
+        assert_eq!(client.withdraw_vested(&501u64, &r), 0i128);
+    }
+
+    #[test]
+    fn test_withdraw_exactly_at_cliff_vests() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&502u64, &r, &1000i128, &start, &(start + 1000), &(start + 500));
+        env.ledger().set_timestamp(start + 500);
+        assert_eq!(client.withdraw_vested(&502u64, &r), 500i128);
+    }
+
+    #[test]
+    fn test_second_withdraw_after_full_vesting_yields_zero() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&503u64, &r, &1000i128, &start, &(start + 1000), &start);
+        env.ledger().set_timestamp(start + 1001);
+        assert_eq!(client.withdraw_vested(&503u64, &r), 1000i128);
+        assert_eq!(client.withdraw_vested(&503u64, &r), 0i128);
+    }
+
+    #[test]
+    fn test_withdraw_after_cancel_yields_zero() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&505u64, &r, &1000i128, &start, &(start + 1000), &start);
+        assert_eq!(client.cancel_stream(&505u64, &r), 1000i128);
+        assert_eq!(client.withdraw_vested(&505u64, &r), 0i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "end_at must be after start_at")]
+    fn test_zero_duration_stream_panics() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&504u64, &r, &1000i128, &start, &start, &start);
+    }
+}
+
