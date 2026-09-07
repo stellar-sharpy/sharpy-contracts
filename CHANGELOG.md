@@ -41,6 +41,7 @@ All notable changes to the Sharpy smart contract are documented here.
 - Crate version `0.1.0` → `0.3.0` to match the release (`contracts/sharpy/Cargo.toml`); README badge and Deployments row aligned
 
 ### Verified
+- `cargo test -p sharpy` — 184 passed on the 0.3.0 release line
 - `cargo test` — 120 passed (was 92)
 - `npm run build` sharpy-app — success with 10 PRs #157-#166 + SDK 11 PRs #77-#87
 
