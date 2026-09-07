@@ -152,4 +152,4 @@ All payout math uses `checked_mul`/`checked_div`/`checked_add`/`checked_sub` to 
 - `contracts/sharpy/src/lib.rs` — contract impl, storage helpers, `SharpyContract`
 - `contracts/sharpy/src/events.rs` — typed event helpers
 - `contracts/sharpy/src/types.rs` — `Invoice`, `SplitRule`, `DisputeState`, etc.
-- `contracts/sharpy/src/test.rs` — 120+ unit/integration tests
+- `contracts/sharpy/src/test.rs` — 184 unit/integration tests
