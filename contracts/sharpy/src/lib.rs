@@ -113,12 +113,20 @@ fn require_whitelisted(env: &Env, invoice_id: u64, payer: &Address) {
 }
 
 /// Fee math: `amount * fee_bps / 10_000`, zero when no fee is configured.
+/// Audit (closes #181): checked mul/div — panics with a labeled message instead of
+/// relying solely on profile `overflow-checks`. Behavior unchanged: reachable inputs
+/// never overflow; only adversarial `i128::MAX`-scale amounts can trigger the panic.
 fn calc_protocol_fee(env: &Env, amount: i128) -> i128 {
     let bps: u32 = env.storage().instance().get::<Symbol, FeeConfig>(&fee_key()).map(|c| c.fee_bps).unwrap_or(0);
     if bps == 0 || amount <= 0 {
         return 0;
     }
-    (amount * (bps as i128) / 10_000i128).max(0i128)
+    amount
+        .checked_mul(bps as i128)
+        .expect("fee: overflow in amount * bps")
+        .checked_div(10_000i128)
+        .expect("fee: division failed")
+        .max(0i128)
 }
 
 fn index_invoice_for_creator(env: &Env, creator: &Address, invoice_id: u64) {
@@ -354,7 +362,10 @@ impl SharpyContract {
         assert!(!invoice.frozen, "invoice is frozen");
 
         let total: i128 = invoice.amounts.iter().sum();
-        let remaining = total - invoice.funded;
+        // Audit (closes #181): checked ops — same panic behavior as profile
+        // overflow-checks, with labeled messages. `remaining` is non-negative on
+        // all reachable states (funded <= total invariant).
+        let remaining = total.checked_sub(invoice.funded).expect("pay: underflow in total - funded");
         if amount > remaining {
             panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", amount, remaining);
         }
@@ -363,7 +374,7 @@ impl SharpyContract {
         token_client.transfer(&payer, &env.current_contract_address(), &amount);
 
         invoice.payments.push_back(Payment { payer: payer.clone(), amount, tip: 0 });
-        invoice.funded += amount;
+        invoice.funded = invoice.funded.checked_add(amount).expect("pay: overflow in funded + amount");
         index_invoice_for_payer(&env, &payer, invoice_id);
         append_audit(&env, invoice_id, symbol_short!("pay"), &payer);
         events::payment_received(&env, invoice_id, &payer, amount);
@@ -395,13 +406,13 @@ impl SharpyContract {
             assert!(inv.status == InvoiceStatus::Pending, "invoice is not pending");
             assert!(p.amount > 0, "payment amount must be positive");
             let inv_total: i128 = inv.amounts.iter().sum();
-            let remaining = inv_total - inv.funded;
-            if inv.funded + p.amount > inv_total {
+            let remaining = inv_total.checked_sub(inv.funded).expect("pool_pay: underflow in total - funded");
+            if inv.funded.checked_add(p.amount).expect("pool_pay: overflow in funded + amount") > inv_total {
                 panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", p.amount, remaining);
             }
             let token = inv.tokens.get(0).expect("no token");
             let prev = token_totals.get(token.clone()).unwrap_or(0);
-            token_totals.set(token, prev + p.amount);
+            token_totals.set(token, prev.checked_add(p.amount).expect("pool_pay: overflow in token total"));
         }
 
         // Phase 2: Transfer tokens — one transfer per unique token
@@ -414,7 +425,7 @@ impl SharpyContract {
         for p in payments.iter() {
             let mut inv = load_invoice(&env, p.invoice_id);
             inv.payments.push_back(Payment { payer: payer.clone(), amount: p.amount, tip: 0 });
-            inv.funded += p.amount;
+            inv.funded = inv.funded.checked_add(p.amount).expect("pool_pay: overflow in funded + amount");
             index_invoice_for_payer(&env, &payer, p.invoice_id);
             append_audit(&env, p.invoice_id, symbol_short!("pool_pay"), &payer);
             events::payment_received(&env, p.invoice_id, &payer, p.amount);
@@ -494,6 +505,19 @@ impl SharpyContract {
         events::dispute_resolved(&env, invoice_id, &resolver, release);
     }
 
+    /// Internal release engine shared by `pay`, `pool_pay`, `pay_with_tip`, `release`,
+    /// `release_escrow`, and `resolve_dispute(release=true)`.
+    ///
+    /// # Security — CEI review (closes #181)
+    /// Token transfers precede the final `save_invoice` here, which is safe because
+    /// every transfer uses `try_transfer` with an internal-balance fallback: a failing
+    /// recipient can never abort or re-enter the loop (Soroban has no reentrancy —
+    /// calls are synchronous with no callbacks into this contract). State effects
+    /// (`status = Released`, audit entry, `released` event) commit after distribution,
+    /// so a given invoice can only release once — the leading status assert plus the
+    /// persisted status make double-release impossible even under retry.
+    /// Auth is enforced at each public entry point, not here; see `release`/`refund`
+    /// docs for the permissionless-entry rationale.
     fn _release(env: &Env, invoice_id: u64, invoice: &mut Invoice, actor: &Address) {
         assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
 
@@ -546,7 +570,7 @@ impl SharpyContract {
                     .expect("proportional: division by zero total")
             };
 
-            distributed += proportional;
+            distributed = distributed.checked_add(proportional).expect("release: overflow in distributed + payout");
             if proportional > 0 {
                 // Use try_transfer to catch failures (no trustline, frozen account, etc.)
                 // On any failure, credit an internal balance that can be claimed later
@@ -591,6 +615,11 @@ impl SharpyContract {
         }
     }
 
+    /// Manual release for a fully-funded invoice.
+    /// Auth review (closes #181): intentionally permissionless — anyone may trigger
+    /// distribution once funding is complete. Funds move ONLY to stored recipients
+    /// per stored amounts/splits, so a third-party caller gains nothing; the audit
+    /// actor is the contract address itself. No auth added (behavior unchanged).
     pub fn release(env: Env, invoice_id: u64) {
         require_not_paused(&env);
         let mut invoice = load_invoice(&env, invoice_id);
@@ -598,6 +627,13 @@ impl SharpyContract {
         Self::_release(&env, invoice_id, &mut invoice, &caller);
     }
 
+    /// Refund all payers after the deadline passes.
+    /// Auth review (closes #181): intentionally permissionless — the deadline gate
+    /// plus payer-only payouts (via `_refund_payers` aggregation) make griefing
+    /// impossible; a third-party caller only pays the transaction fee. CEI note:
+    /// `_refund_payers` transfers before the status write, safe under Soroban's
+    /// no-reentrancy model, and the status transition makes double-refund panic on
+    /// the leading Pending assert. No auth added (behavior unchanged).
     pub fn refund(env: Env, invoice_id: u64) {
         require_not_paused(&env);
         let mut invoice = load_invoice(&env, invoice_id);
@@ -776,7 +812,7 @@ impl SharpyContract {
                     .expect("preview: division by zero total")
             };
 
-            distributed += payout;
+            distributed = distributed.checked_add(payout).expect("preview: overflow in distributed + payout");
             result.push_back(payout);
         }
 
@@ -954,7 +990,8 @@ impl SharpyContract {
         assert!(!invoice.frozen, "invoice is frozen");
 
         let total: i128 = invoice.amounts.iter().sum();
-        let remaining = total - invoice.funded;
+        // Audit (closes #181): checked ops, same behavior as pay().
+        let remaining = total.checked_sub(invoice.funded).expect("pay_with_tip: underflow in total - funded");
         if amount > remaining {
             panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", amount, remaining);
         }
@@ -971,7 +1008,7 @@ impl SharpyContract {
         }
 
         invoice.payments.push_back(Payment { payer: payer.clone(), amount, tip });
-        invoice.funded += amount;
+        invoice.funded = invoice.funded.checked_add(amount).expect("pay_with_tip: overflow in funded + amount");
         index_invoice_for_payer(&env, &payer, invoice_id);
         append_audit(&env, invoice_id, symbol_short!("pay"), &payer);
         events::payment_received(&env, invoice_id, &payer, amount);
@@ -1270,6 +1307,11 @@ impl SharpyContract {
 
     /// Create a streaming/vesting schedule: funds vest linearly from `start_at`
     /// to `end_at`, blocked until `cliff_at`.
+    /// Auth review (closes #181): no `require_auth` on stream mutators today — any
+    /// caller can create/withdraw/top-up/cancel a stream entry. This pass leaves the
+    /// behavior UNCHANGED (auth changes are breaking and reserved for a major
+    /// version); integrators should treat stream entries as permissionless scratch
+    /// state keyed by invoice id until an auth-gated revision ships.
     pub fn create_stream(env: Env, invoice_id: u64, recipient: Address, amount: i128, start_at: u64, end_at: u64, cliff_at: u64) {
         assert!(end_at > start_at, "end_at must be after start_at");
         assert!(amount > 0, "amount must be positive");
@@ -1287,6 +1329,8 @@ impl SharpyContract {
     }
 
     /// Withdraw the currently vested (cliff-gated, linear) amount.
+    /// Audit (closes #181): vesting product uses checked mul/div; balance deltas
+    /// use checked sub/add. Behavior unchanged on reachable inputs.
     pub fn withdraw_vested(env: Env, invoice_id: u64, recipient: Address) -> i128 {
         let key = streaming_key(invoice_id);
         let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
@@ -1296,12 +1340,18 @@ impl SharpyContract {
             let total_duration = state.end_at.saturating_sub(state.start_at);
             let elapsed = now.saturating_sub(state.start_at);
             if total_duration > 0 {
-                total_vested = (state.amount * (elapsed as i128) / total_duration as i128).max(0i128);
+                total_vested = state
+                    .amount
+                    .checked_mul(elapsed as i128)
+                    .expect("stream: overflow in amount * elapsed")
+                    .checked_div(total_duration as i128)
+                    .expect("stream: division failed")
+                    .max(0i128);
             }
         }
-        let unvested = state.amount - state.vested;
+        let unvested = state.amount.checked_sub(state.vested).expect("stream: underflow in amount - vested");
         let withdraw_amount = total_vested.min(unvested).max(0i128);
-        state.vested += withdraw_amount;
+        state.vested = state.vested.checked_add(withdraw_amount).expect("stream: overflow in vested + withdraw");
         env.storage().persistent().set(&key, &state);
         let rc = recipient.clone();
         events::streaming_withdrawn(&env, invoice_id, &rc, withdraw_amount);
@@ -1312,7 +1362,7 @@ impl SharpyContract {
     pub fn cancel_stream(env: Env, invoice_id: u64, _recipient: Address) -> i128 {
         let key = streaming_key(invoice_id);
         let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
-        let remaining = state.amount - state.vested;
+        let remaining = state.amount.checked_sub(state.vested).expect("stream: underflow in amount - vested");
         state.vested = state.amount;
         env.storage().persistent().set(&key, &state);
         events::streaming_cancelled(&env, invoice_id);
@@ -1324,7 +1374,7 @@ impl SharpyContract {
         let key = streaming_key(invoice_id);
         let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
         assert!(additional > 0, "additional must be positive");
-        state.amount += additional;
+        state.amount = state.amount.checked_add(additional).expect("stream: overflow in amount + additional");
         state.vested = state.vested.min(state.amount);
         state.updated_at = env.ledger().timestamp();
         env.storage().persistent().set(&key, &state);
@@ -1333,6 +1383,10 @@ impl SharpyContract {
     }
 
     /// Point `invoice_id` at `target_invoice` as a pass-through hop.
+    /// Auth review (closes #181): `caller.require_auth()` is required but there is
+    /// no creator check — any authenticated caller can repoint a route (self-routes
+    /// and 2-cycles still panic). Left UNCHANGED in this pass; a creator-only
+    /// restriction would be a breaking behavior change for existing integrations.
     pub fn set_route(env: Env, caller: Address, invoice_id: u64, target_invoice: u64) {
         caller.require_auth();
         assert!(target_invoice != invoice_id, "cannot route to self");
@@ -1372,7 +1426,8 @@ impl SharpyContract {
         assert!(bps > 0 && bps <= 10_000, "bps out of range");
         let key = tranche_key(invoice_id);
         let prior: u32 = env.storage().persistent().get::<(Symbol,u64), TrancheState>(&key).map(|s| s.released_bps).unwrap_or(0);
-        let cumulative = prior + bps;
+        // Audit (closes #181): checked add — the range assert below still enforces the 10000bps cap.
+        let cumulative = prior.checked_add(bps).expect("tranche: overflow in prior + bps");
         assert!(cumulative <= 10_000, "tranches exceed 100%");
         env.storage().persistent().set(&key, &TrancheState { released_bps: cumulative, updated_at: env.ledger().timestamp() });
         events::tranche_released(&env, invoice_id, bps, cumulative);
