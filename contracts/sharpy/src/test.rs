@@ -5182,3 +5182,61 @@ mod test_edge_whitelist {
         client.set_whitelist(&other, &id, &Vec::new(&env));
     }
 }
+
+#[cfg(test)]
+mod test_edge_fee {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c, a)
+    }
+
+    #[test]
+    fn test_preview_zero_when_no_fee_configured() {
+        let (env, client, _) = setup();
+        let _ = &env;
+        assert_eq!(client.preview_fee(&1_000_000i128), 0i128);
+    }
+
+    #[test]
+    fn test_preview_zero_amount_is_zero() {
+        let (env, client, admin) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&500u32, &collector);
+        let _ = &admin;
+        assert_eq!(client.preview_fee(&0i128), 0i128);
+    }
+
+    #[test]
+    fn test_full_10000bps_fee_equals_amount() {
+        let (env, client, _) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&10_000u32, &collector);
+        assert_eq!(client.preview_fee(&12_345i128), 12_345i128);
+    }
+
+    #[test]
+    fn test_fractional_fee_truncates_down() {
+        let (env, client, _) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&100u32, &collector);
+        assert_eq!(client.preview_fee(&1i128), 0i128);
+        assert_eq!(client.preview_fee(&10_000i128), 100i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "fee bps out of range")]
+    fn test_fee_over_cap_panics() {
+        let (env, client, _) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&10_001u32, &collector);
+    }
+}
