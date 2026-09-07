@@ -25,6 +25,12 @@ instance storage (no TTL); every per-invoice entry plus the counters lives in pe
 | `("itags", id)` | `InvoiceTags` | persistent | Categorized tags via `set/get_invoice_tags` |
 | `("arch", id)` | `ArchivalState` | persistent | Terminal archive flag via `archive/unarchive/is_archived` |
 | `("appr", id)` | `ApprovalState` | persistent | Multi-approver config via `set_approval_config`/`approve_invoice` |
+| `("tmpl", template_id)` | `InvoiceTemplate` | persistent | Reusable configs via `create_template`/`get_template` |
+| `tmpl_ctr` | `u64` | persistent | Global template ID counter |
+| `("rpause", id)` | `RecurringPauseState` | persistent | Recurring-chain pause via `pause/resume_recurring` |
+| `("disc", id)` | `DiscountConfig` | persistent | Discount bps via `set/get_discount` |
+| `("imeta", id)` | `InvoiceMetadata` | persistent | Key-value entries via `set/get_invoice_metadata` |
+| `("imemo", id)` | `InvoiceExtraMemo` | persistent | 256-char memo via `set/get_invoice_memo_ext` |
 
 TTL extension: every `save_invoice` and index/balance write calls `extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
 
