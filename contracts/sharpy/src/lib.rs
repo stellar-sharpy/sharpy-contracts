@@ -899,6 +899,18 @@ impl SharpyContract {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
+    /// Returns one page of invoice IDs that `payer` has paid toward.
+    /// Same `limit`/`offset` guards as the creator variant: 0 limit or
+    /// past-the-end offset yields an empty page. The unpaginated
+    /// `get_invoices_by_payer` is unchanged.
+    pub fn get_invoices_by_payer_paginated(env: Env, payer: Address, limit: u32, offset: u32) -> Vec<u64> {
+        let ids: Vec<u64> = env.storage()
+            .persistent()
+            .get(&payer_index_key(&payer))
+            .unwrap_or_else(|| Vec::new(&env));
+        paginate_ids(&env, ids, limit, offset)
+    }
+
     /// Pay toward an invoice with an optional tip.
     /// The tip is transferred directly to the treasury on top of the invoice payment.
     /// `tip` is stored on the Payment record but does NOT count toward `invoice.funded`
