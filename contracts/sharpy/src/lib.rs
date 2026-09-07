@@ -141,6 +141,26 @@ fn index_invoice_for_payer(env: &Env, payer: &Address, invoice_id: u64) {
     }
 }
 
+/// Slice an index vector with limit/offset bounds guards.
+/// Returns at most `limit` ids starting at `offset`; empty when `limit == 0`
+/// or `offset >= len`. Never panics on out-of-range input — callers pass
+/// user-supplied pagination params directly.
+fn paginate_ids(env: &Env, ids: Vec<u64>, limit: u32, offset: u32) -> Vec<u64> {
+    let mut out: Vec<u64> = Vec::new(env);
+    let len = ids.len();
+    if limit == 0 || offset >= len {
+        return out;
+    }
+    let mut i = offset;
+    let mut n: u32 = 0;
+    while i < len && n < limit {
+        out.push_back(ids.get(i).unwrap());
+        i += 1;
+        n += 1;
+    }
+    out
+}
+
 /// Credits an internal balance for an account+token pair when a direct transfer fails.
 /// Used in _release when a recipient cannot receive funds (no trustline, frozen account, etc.)
 /// The credited amount can be withdrawn later via claim().
@@ -755,6 +775,18 @@ impl SharpyContract {
             .persistent()
             .get(&creator_index_key(&creator))
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Returns one page of invoice IDs created by `creator`.
+    /// `limit` caps the page size (0 yields an empty page); `offset` skips that
+    /// many entries (past-the-end yields an empty page). Index order is creation
+    /// order. The unpaginated `get_invoices_by_creator` is unchanged.
+    pub fn get_invoices_by_creator_paginated(env: Env, creator: Address, limit: u32, offset: u32) -> Vec<u64> {
+        let ids: Vec<u64> = env.storage()
+            .persistent()
+            .get(&creator_index_key(&creator))
+            .unwrap_or_else(|| Vec::new(&env));
+        paginate_ids(&env, ids, limit, offset)
     }
 
     /// Returns the claimable balance for a given account and token.
