@@ -19,6 +19,8 @@ All notable changes to the Sharpy smart contract are documented here.
 - `set_invoice_memo_ext`/`get_invoice_memo_ext` — InvoiceExtraMemo (256 chars) — feat/invoice-memo-ext (138 tests)
  - 2026-08-28 — 30 PR day: 7 features + 12 test PRs + docs (120 tests passing)
 
+## [0.3.0]
+
 ### Added
 - `get_invoice_version(id)` — returns invoice schema version (always 1) — `feat/get-invoice-version` + test PR #142
 - `get_treasury()` — admin query returning initialized treasury address — `feat/get-treasury` + test PR #142
