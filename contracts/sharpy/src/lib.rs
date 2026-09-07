@@ -505,6 +505,19 @@ impl SharpyContract {
         events::dispute_resolved(&env, invoice_id, &resolver, release);
     }
 
+    /// Internal release engine shared by `pay`, `pool_pay`, `pay_with_tip`, `release`,
+    /// `release_escrow`, and `resolve_dispute(release=true)`.
+    ///
+    /// # Security — CEI review (closes #181)
+    /// Token transfers precede the final `save_invoice` here, which is safe because
+    /// every transfer uses `try_transfer` with an internal-balance fallback: a failing
+    /// recipient can never abort or re-enter the loop (Soroban has no reentrancy —
+    /// calls are synchronous with no callbacks into this contract). State effects
+    /// (`status = Released`, audit entry, `released` event) commit after distribution,
+    /// so a given invoice can only release once — the leading status assert plus the
+    /// persisted status make double-release impossible even under retry.
+    /// Auth is enforced at each public entry point, not here; see `release`/`refund`
+    /// docs for the permissionless-entry rationale.
     fn _release(env: &Env, invoice_id: u64, invoice: &mut Invoice, actor: &Address) {
         assert!(invoice.status == InvoiceStatus::Pending, "invoice is not pending");
 
@@ -602,6 +615,11 @@ impl SharpyContract {
         }
     }
 
+    /// Manual release for a fully-funded invoice.
+    /// Auth review (closes #181): intentionally permissionless — anyone may trigger
+    /// distribution once funding is complete. Funds move ONLY to stored recipients
+    /// per stored amounts/splits, so a third-party caller gains nothing; the audit
+    /// actor is the contract address itself. No auth added (behavior unchanged).
     pub fn release(env: Env, invoice_id: u64) {
         require_not_paused(&env);
         let mut invoice = load_invoice(&env, invoice_id);
@@ -609,6 +627,13 @@ impl SharpyContract {
         Self::_release(&env, invoice_id, &mut invoice, &caller);
     }
 
+    /// Refund all payers after the deadline passes.
+    /// Auth review (closes #181): intentionally permissionless — the deadline gate
+    /// plus payer-only payouts (via `_refund_payers` aggregation) make griefing
+    /// impossible; a third-party caller only pays the transaction fee. CEI note:
+    /// `_refund_payers` transfers before the status write, safe under Soroban's
+    /// no-reentrancy model, and the status transition makes double-refund panic on
+    /// the leading Pending assert. No auth added (behavior unchanged).
     pub fn refund(env: Env, invoice_id: u64) {
         require_not_paused(&env);
         let mut invoice = load_invoice(&env, invoice_id);
@@ -1282,6 +1307,11 @@ impl SharpyContract {
 
     /// Create a streaming/vesting schedule: funds vest linearly from `start_at`
     /// to `end_at`, blocked until `cliff_at`.
+    /// Auth review (closes #181): no `require_auth` on stream mutators today — any
+    /// caller can create/withdraw/top-up/cancel a stream entry. This pass leaves the
+    /// behavior UNCHANGED (auth changes are breaking and reserved for a major
+    /// version); integrators should treat stream entries as permissionless scratch
+    /// state keyed by invoice id until an auth-gated revision ships.
     pub fn create_stream(env: Env, invoice_id: u64, recipient: Address, amount: i128, start_at: u64, end_at: u64, cliff_at: u64) {
         assert!(end_at > start_at, "end_at must be after start_at");
         assert!(amount > 0, "amount must be positive");
@@ -1353,6 +1383,10 @@ impl SharpyContract {
     }
 
     /// Point `invoice_id` at `target_invoice` as a pass-through hop.
+    /// Auth review (closes #181): `caller.require_auth()` is required but there is
+    /// no creator check — any authenticated caller can repoint a route (self-routes
+    /// and 2-cycles still panic). Left UNCHANGED in this pass; a creator-only
+    /// restriction would be a breaking behavior change for existing integrations.
     pub fn set_route(env: Env, caller: Address, invoice_id: u64, target_invoice: u64) {
         caller.require_auth();
         assert!(target_invoice != invoice_id, "cannot route to self");
