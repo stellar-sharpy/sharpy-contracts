@@ -22,6 +22,9 @@ instance storage (no TTL); every per-invoice entry plus the counters lives in pe
 | `("by_pyr", payer)` | `Vec<u64>` | persistent | Payer index |
 | `("acc_bal", account, token)` | `i128` | persistent | Claimable fallback balance |
 | `("notes", id)` | `InvoiceNotes` | persistent | Free-text notes |
+| `("itags", id)` | `InvoiceTags` | persistent | Categorized tags via `set/get_invoice_tags` |
+| `("arch", id)` | `ArchivalState` | persistent | Terminal archive flag via `archive/unarchive/is_archived` |
+| `("appr", id)` | `ApprovalState` | persistent | Multi-approver config via `set_approval_config`/`approve_invoice` |
 
 TTL extension: every `save_invoice` and index/balance write calls `extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
 
