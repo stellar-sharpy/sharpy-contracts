@@ -1299,6 +1299,8 @@ impl SharpyContract {
     }
 
     /// Withdraw the currently vested (cliff-gated, linear) amount.
+    /// Audit (closes #181): vesting product uses checked mul/div; balance deltas
+    /// use checked sub/add. Behavior unchanged on reachable inputs.
     pub fn withdraw_vested(env: Env, invoice_id: u64, recipient: Address) -> i128 {
         let key = streaming_key(invoice_id);
         let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
@@ -1308,12 +1310,18 @@ impl SharpyContract {
             let total_duration = state.end_at.saturating_sub(state.start_at);
             let elapsed = now.saturating_sub(state.start_at);
             if total_duration > 0 {
-                total_vested = (state.amount * (elapsed as i128) / total_duration as i128).max(0i128);
+                total_vested = state
+                    .amount
+                    .checked_mul(elapsed as i128)
+                    .expect("stream: overflow in amount * elapsed")
+                    .checked_div(total_duration as i128)
+                    .expect("stream: division failed")
+                    .max(0i128);
             }
         }
-        let unvested = state.amount - state.vested;
+        let unvested = state.amount.checked_sub(state.vested).expect("stream: underflow in amount - vested");
         let withdraw_amount = total_vested.min(unvested).max(0i128);
-        state.vested += withdraw_amount;
+        state.vested = state.vested.checked_add(withdraw_amount).expect("stream: overflow in vested + withdraw");
         env.storage().persistent().set(&key, &state);
         let rc = recipient.clone();
         events::streaming_withdrawn(&env, invoice_id, &rc, withdraw_amount);
@@ -1324,7 +1332,7 @@ impl SharpyContract {
     pub fn cancel_stream(env: Env, invoice_id: u64, _recipient: Address) -> i128 {
         let key = streaming_key(invoice_id);
         let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
-        let remaining = state.amount - state.vested;
+        let remaining = state.amount.checked_sub(state.vested).expect("stream: underflow in amount - vested");
         state.vested = state.amount;
         env.storage().persistent().set(&key, &state);
         events::streaming_cancelled(&env, invoice_id);
@@ -1336,7 +1344,7 @@ impl SharpyContract {
         let key = streaming_key(invoice_id);
         let mut state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&key).expect("no stream");
         assert!(additional > 0, "additional must be positive");
-        state.amount += additional;
+        state.amount = state.amount.checked_add(additional).expect("stream: overflow in amount + additional");
         state.vested = state.vested.min(state.amount);
         state.updated_at = env.ledger().timestamp();
         env.storage().persistent().set(&key, &state);
