@@ -31,6 +31,11 @@ instance storage (no TTL); every per-invoice entry plus the counters lives in pe
 | `("disc", id)` | `DiscountConfig` | persistent | Discount bps via `set/get_discount` |
 | `("imeta", id)` | `InvoiceMetadata` | persistent | Key-value entries via `set/get_invoice_metadata` |
 | `("imemo", id)` | `InvoiceExtraMemo` | persistent | 256-char memo via `set/get_invoice_memo_ext` |
+| `("strm", id)` | `StreamingState` | persistent | Cliff-gated vesting via `create_stream`/`withdraw_vested`/`cancel_stream`/`top_up_stream` |
+| `("route", id)` | `ComposableRoute` | persistent | Pass-through hop via `set/get/resolve_route` |
+| `("tranche", id)` | `TrancheState` | persistent | Partial-release accounting via `release_tranche`/`get_released_bps` |
+| `("wlist", id)` | `WhitelistState` | persistent | Payer allowlist enforced in `pay` via `set/get/add/remove_whitelisted_payer` |
+| `fee` | `FeeConfig` | instance | Protocol fee bps + collector via `set/get_protocol_fee`/`preview_fee` |
 
 TTL extension: every `save_invoice` and index/balance write calls `extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
 
