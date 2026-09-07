@@ -4613,3 +4613,63 @@ mod test_fee_estimate_bounds {
     }
 }
 
+#[cfg(test)]
+mod test_fee_estimate_totals {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address, amounts: &[i128]) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let mut recipients = Vec::new(env);
+        let mut amts = Vec::new(env);
+        let mut toks = Vec::new(env);
+        for a in amounts.iter() {
+            recipients.push_back(Address::generate(env));
+            amts.push_back(*a);
+            toks.push_back(Address::generate(env));
+        }
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(creator, &recipients, &amts, &toks, &dl, &opts)
+    }
+
+    #[test]
+    fn test_fee_estimate_sums_multi_recipient_total() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&100u32, &collector);
+        let id = mk(&env, &client, &creator, &[6000i128, 4000i128]);
+        assert_eq!(client.preview_fee_for_invoice(&id), 100i128);
+    }
+
+    #[test]
+    fn test_fee_estimate_is_pure_view() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&500u32, &collector);
+        let id = mk(&env, &client, &creator, &[10_000i128]);
+        assert_eq!(client.preview_fee_for_invoice(&id), 500i128);
+        // Estimate must not mutate stored config
+        assert_eq!(client.get_protocol_fee().unwrap().fee_bps, 500u32);
+        assert_eq!(client.get_invoice(&id).funded, 0i128);
+    }
+}
+
