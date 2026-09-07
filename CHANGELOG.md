@@ -3,20 +3,22 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
-- feat: protocol fee — `set/get_protocol_fee` + `preview_fee` bps cut (`FeeConfig`, 184 tests)
-- feat: whitelist gating — `set/get_whitelist` + add/remove enforced in `pay` (`WhitelistState`, 181 tests)
-- feat: tranche release — `release_tranche`/`get_released_bps` partial release in bps (`TrancheState`, 178 tests)
-- feat: composable routing — `set_route`/`get_route`/`resolve_route` pass-through hop (`ComposableRoute`, 174 tests)
+
+## [0.3.0] - 2026-09-04
 - feat: streaming payments — `create_stream`/`withdraw_vested`/`cancel_stream`/`top_up_stream` cliff-gated linear vesting (`StreamingState`, 170 tests)
-- feat: archival — archive and restore invoices — Adds archive_invoice and is_archived query, creator-only, 3 
+- feat: composable routing — `set_route`/`get_route`/`resolve_route` pass-through hop (`ComposableRoute`, 174 tests)
+- feat: tranche release — `release_tranche`/`get_released_bps` partial release in bps (`TrancheState`, 178 tests)
+- feat: whitelist gating — `set/get_whitelist` + add/remove enforced in `pay` (`WhitelistState`, 181 tests)
+- feat: protocol fee — `set/get_protocol_fee` + `preview_fee` bps cut (`FeeConfig`, 184 tests)
 - feat: approval flow — multi-approver workflow — feat/approval-flow
+- feat: archival — archive and restore invoices — Adds archive_invoice and is_archived query, creator-only, 3 
 - feat: invoice templates — reusable invoice configs — Adds InvoiceTemplate struct and create/get_template function
-- feat: recurring pause — pause/resume recurring chain — Adds pause_recurring / resume_recurring and is_recurring_pau
 - feat: discount config — set/get_discount — feat/discount-config
 - feat: invoice metadata — set/get_invoice_metadata — Adds InvoiceMetadata (key-value map) via set/get with creato
+- `set_invoice_memo_ext`/`get_invoice_memo_ext` — InvoiceExtraMemo (256 chars) — feat/invoice-memo-ext (138 tests)
+- feat: recurring pause — pause/resume recurring chain — Adds pause_recurring / resume_recurring and is_recurring_pau
 - feat: deadline extension — extend_deadline for creators — Adds extend_deadline(caller, id, new_deadline) allowing crea
 - feat: batch refund — refund_batch for multiple invoices — Adds refund_batch(caller, ids) to refund multiple deadline-p
-- `set_invoice_memo_ext`/`get_invoice_memo_ext` — InvoiceExtraMemo (256 chars) — feat/invoice-memo-ext (138 tests)
  - 2026-08-28 — 30 PR day: 7 features + 12 test PRs + docs (120 tests passing)
 
 ### Added
