@@ -557,7 +557,7 @@ impl SharpyContract {
                     .expect("proportional: division by zero total")
             };
 
-            distributed += proportional;
+            distributed = distributed.checked_add(proportional).expect("release: overflow in distributed + payout");
             if proportional > 0 {
                 // Use try_transfer to catch failures (no trustline, frozen account, etc.)
                 // On any failure, credit an internal balance that can be claimed later
@@ -787,7 +787,7 @@ impl SharpyContract {
                     .expect("preview: division by zero total")
             };
 
-            distributed += payout;
+            distributed = distributed.checked_add(payout).expect("preview: overflow in distributed + payout");
             result.push_back(payout);
         }
 
@@ -1392,7 +1392,8 @@ impl SharpyContract {
         assert!(bps > 0 && bps <= 10_000, "bps out of range");
         let key = tranche_key(invoice_id);
         let prior: u32 = env.storage().persistent().get::<(Symbol,u64), TrancheState>(&key).map(|s| s.released_bps).unwrap_or(0);
-        let cumulative = prior + bps;
+        // Audit (closes #181): checked add — the range assert below still enforces the 10000bps cap.
+        let cumulative = prior.checked_add(bps).expect("tranche: overflow in prior + bps");
         assert!(cumulative <= 10_000, "tranches exceed 100%");
         env.storage().persistent().set(&key, &TrancheState { released_bps: cumulative, updated_at: env.ledger().timestamp() });
         events::tranche_released(&env, invoice_id, bps, cumulative);
