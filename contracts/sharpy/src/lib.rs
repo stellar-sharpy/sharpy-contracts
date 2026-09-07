@@ -1343,6 +1343,7 @@ impl SharpyContract {
             updated_at: env.ledger().timestamp(),
         });
         events::whitelist_set(&env, invoice_id, count);
+        events::invoice_updated(&env, invoice_id, &caller);
     }
 
     /// Return the payer whitelist for `invoice_id`, if any.
@@ -1363,6 +1364,7 @@ impl SharpyContract {
         let count = state.payers.len();
         env.storage().persistent().set(&whitelist_key(invoice_id), &state);
         events::whitelist_set(&env, invoice_id, count);
+        events::invoice_updated(&env, invoice_id, &caller);
     }
 
     /// Remove one payer from the whitelist (creator-only).
@@ -1382,6 +1384,7 @@ impl SharpyContract {
         state.updated_at = env.ledger().timestamp();
         env.storage().persistent().set(&whitelist_key(invoice_id), &state);
         events::whitelist_payer_removed(&env, invoice_id, &rc);
+        events::invoice_updated(&env, invoice_id, &caller);
     }
 }
 
