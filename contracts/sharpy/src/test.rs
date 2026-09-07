@@ -4391,3 +4391,80 @@ mod test_index_pagination_creator {
     }
 }
 
+#[cfg(test)]
+mod test_index_pagination_bounds {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [100i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_limit_zero_returns_empty_page() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let _id = mk(&env, &client, &creator);
+        assert!(client.get_creator_invoices_paged(&creator, &0u32, &0u32).is_empty());
+        assert!(client.get_payer_invoices_paged(&creator, &0u32, &0u32).is_empty());
+    }
+
+    #[test]
+    fn test_offset_past_end_returns_empty_page() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let _id = mk(&env, &client, &creator);
+        assert!(client.get_creator_invoices_paged(&creator, &10u32, &5u32).is_empty());
+        assert!(client.get_creator_invoices_paged(&creator, &10u32, &1u32).is_empty());
+    }
+
+    #[test]
+    fn test_limit_truncates_to_remainder() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        let page = client.get_creator_invoices_paged(&creator, &100u32, &1u32);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page.get(0).unwrap(), id2);
+        let _ = id1;
+    }
+
+    #[test]
+    fn test_unknown_creator_returns_empty_page() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let _id = mk(&env, &client, &creator);
+        assert!(client.get_creator_invoices_paged(&stranger, &10u32, &0u32).is_empty());
+    }
+}
+
