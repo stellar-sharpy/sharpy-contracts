@@ -4863,3 +4863,380 @@ mod test_audit_hardening {
     }
 }
 
+#[cfg(test)]
+mod test_edge_streaming_cliff {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    #[test]
+    fn test_withdraw_one_ledger_before_cliff_yields_zero() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&501u64, &r, &1000i128, &start, &(start + 1000), &(start + 500));
+        env.ledger().set_timestamp(start + 499);
+        assert_eq!(client.withdraw_vested(&501u64, &r), 0i128);
+    }
+
+    #[test]
+    fn test_withdraw_exactly_at_cliff_vests() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&502u64, &r, &1000i128, &start, &(start + 1000), &(start + 500));
+        env.ledger().set_timestamp(start + 500);
+        assert_eq!(client.withdraw_vested(&502u64, &r), 500i128);
+    }
+
+    #[test]
+    fn test_second_withdraw_after_full_vesting_yields_zero() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&503u64, &r, &1000i128, &start, &(start + 1000), &start);
+        env.ledger().set_timestamp(start + 1001);
+        assert_eq!(client.withdraw_vested(&503u64, &r), 1000i128);
+        assert_eq!(client.withdraw_vested(&503u64, &r), 0i128);
+    }
+
+    #[test]
+    fn test_withdraw_after_cancel_yields_zero() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&505u64, &r, &1000i128, &start, &(start + 1000), &start);
+        assert_eq!(client.cancel_stream(&505u64, &r), 1000i128);
+        assert_eq!(client.withdraw_vested(&505u64, &r), 0i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "end_at must be after start_at")]
+    fn test_zero_duration_stream_panics() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&504u64, &r, &1000i128, &start, &start, &start);
+    }
+}
+
+#[cfg(test)]
+mod test_edge_routing {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [100i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_route_overwrite_latest_wins() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        let id3 = mk(&env, &client, &creator);
+        client.set_route(&creator, &id1, &id2);
+        assert_eq!(client.resolve_route(&id1), id2);
+        client.set_route(&creator, &id1, &id3);
+        assert_eq!(client.get_route(&id1).unwrap().target_invoice, id3);
+        assert_eq!(client.resolve_route(&id1), id3);
+    }
+
+    #[test]
+    #[should_panic(expected = "invoice not found")]
+    fn test_route_to_missing_invoice_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        client.set_route(&creator, &id1, &999_999u64);
+    }
+
+    #[test]
+    fn test_resolve_follows_single_hop_only() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        let id3 = mk(&env, &client, &creator);
+        client.set_route(&creator, &id1, &id2);
+        client.set_route(&creator, &id2, &id3);
+        assert_eq!(client.resolve_route(&id1), id2);
+        assert_eq!(client.resolve_route(&id2), id3);
+        assert_eq!(client.resolve_route(&id3), id3);
+    }
+}
+
+
+#[cfg(test)]
+mod test_edge_tranche {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [100i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_full_release_10000bps_single_call() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        assert_eq!(client.release_tranche(&creator, &id, &10_000u32), 10_000u32);
+        assert_eq!(client.get_released_bps(&id), 10_000u32);
+    }
+
+    #[test]
+    fn test_cumulative_release_sums_to_cap() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        assert_eq!(client.release_tranche(&creator, &id, &4_000u32), 4_000u32);
+        assert_eq!(client.release_tranche(&creator, &id, &6_000u32), 10_000u32);
+        assert_eq!(client.get_released_bps(&id), 10_000u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "tranches exceed 100%")]
+    fn test_over_cap_second_release_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &id, &6_000u32);
+        client.release_tranche(&creator, &id, &4_001u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "bps out of range")]
+    fn test_zero_bps_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &id, &0u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "only creator can release tranches")]
+    fn test_non_creator_release_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let other = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.release_tranche(&other, &id, &1_000u32);
+    }
+}
+
+#[cfg(test)]
+mod test_edge_whitelist {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [100i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_empty_whitelist_is_open() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        assert!(client.get_whitelist(&id).is_none());
+        client.set_whitelist(&creator, &id, &Vec::new(&env));
+        let state = client.get_whitelist(&id).unwrap();
+        assert_eq!(state.payers.len(), 0);
+    }
+
+    #[test]
+    fn test_add_payer_is_idempotent() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.add_whitelisted_payer(&creator, &id, &payer);
+        client.add_whitelisted_payer(&creator, &id, &payer);
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_last_payer_leaves_empty_list() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.add_whitelisted_payer(&creator, &id, &payer);
+        client.remove_whitelisted_payer(&creator, &id, &payer);
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "no whitelist")]
+    fn test_remove_without_whitelist_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.remove_whitelisted_payer(&creator, &id, &payer);
+    }
+
+    #[test]
+    #[should_panic(expected = "only creator can set whitelist")]
+    fn test_non_creator_set_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let other = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.set_whitelist(&other, &id, &Vec::new(&env));
+    }
+}
+
+#[cfg(test)]
+mod test_edge_fee {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c, a)
+    }
+
+    #[test]
+    fn test_preview_zero_when_no_fee_configured() {
+        let (env, client, _) = setup();
+        let _ = &env;
+        assert_eq!(client.preview_fee(&1_000_000i128), 0i128);
+    }
+
+    #[test]
+    fn test_preview_zero_amount_is_zero() {
+        let (env, client, admin) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&500u32, &collector);
+        let _ = &admin;
+        assert_eq!(client.preview_fee(&0i128), 0i128);
+    }
+
+    #[test]
+    fn test_full_10000bps_fee_equals_amount() {
+        let (env, client, _) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&10_000u32, &collector);
+        assert_eq!(client.preview_fee(&12_345i128), 12_345i128);
+    }
+
+    #[test]
+    fn test_fractional_fee_truncates_down() {
+        let (env, client, _) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&100u32, &collector);
+        assert_eq!(client.preview_fee(&1i128), 0i128);
+        assert_eq!(client.preview_fee(&10_000i128), 100i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "fee bps out of range")]
+    fn test_fee_over_cap_panics() {
+        let (env, client, _) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&10_001u32, &collector);
+    }
+}
