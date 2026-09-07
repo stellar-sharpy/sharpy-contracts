@@ -38,6 +38,7 @@ All notable changes to the Sharpy smart contract are documented here.
 - `pay()` and `pay_with_tip()` now check `invoice.frozen` before processing (`"invoice is frozen"` panic)
 - `types.rs` adds `InvoiceNotes` struct; `lib.rs` imports `String` and `InvoiceNotes`, adds `invoice_notes_key`
 - `README.md` badge 92→120, Functions table + Project Structure updated
+- Crate version `0.1.0` → `0.3.0` to match the release (`contracts/sharpy/Cargo.toml`); README badge and Deployments row aligned
 
 ### Verified
 - `cargo test` — 120 passed (was 92)
