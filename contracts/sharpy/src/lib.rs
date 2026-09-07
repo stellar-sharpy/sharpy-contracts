@@ -113,12 +113,20 @@ fn require_whitelisted(env: &Env, invoice_id: u64, payer: &Address) {
 }
 
 /// Fee math: `amount * fee_bps / 10_000`, zero when no fee is configured.
+/// Audit (closes #181): checked mul/div — panics with a labeled message instead of
+/// relying solely on profile `overflow-checks`. Behavior unchanged: reachable inputs
+/// never overflow; only adversarial `i128::MAX`-scale amounts can trigger the panic.
 fn calc_protocol_fee(env: &Env, amount: i128) -> i128 {
     let bps: u32 = env.storage().instance().get::<Symbol, FeeConfig>(&fee_key()).map(|c| c.fee_bps).unwrap_or(0);
     if bps == 0 || amount <= 0 {
         return 0;
     }
-    (amount * (bps as i128) / 10_000i128).max(0i128)
+    amount
+        .checked_mul(bps as i128)
+        .expect("fee: overflow in amount * bps")
+        .checked_div(10_000i128)
+        .expect("fee: division failed")
+        .max(0i128)
 }
 
 fn index_invoice_for_creator(env: &Env, creator: &Address, invoice_id: u64) {
