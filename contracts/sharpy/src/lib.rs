@@ -1389,6 +1389,16 @@ impl SharpyContract {
         fee
     }
 
+    /// Preview the protocol fee owed on an invoice's full target total.
+    /// Sums `amounts` and applies the current fee config — pure view, no state
+    /// change and no events. Call before `pay` so signers see the fee estimate
+    /// up front. Returns 0 when no fee is configured.
+    pub fn preview_fee_for_invoice(env: Env, invoice_id: u64) -> i128 {
+        let invoice = load_invoice(&env, invoice_id);
+        let total: i128 = invoice.amounts.iter().sum();
+        calc_protocol_fee(&env, total)
+    }
+
     /// Set the payer whitelist for `invoice_id` (creator-only; empty = open).
     pub fn set_whitelist(env: Env, caller: Address, invoice_id: u64, payers: Vec<Address>) {
         caller.require_auth();
