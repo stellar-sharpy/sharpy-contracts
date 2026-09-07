@@ -4744,3 +4744,122 @@ mod test_ttl_hint {
     }
 }
 
+#[cfg(test)]
+mod test_audit_hardening {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, token, Address, Env, Vec};
+    use crate::{types::InvoiceStatus, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn opts(env: &Env) -> crate::types::InvoiceOptions {
+        crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        }
+    }
+
+    #[test]
+    fn test_partial_pays_accumulate_exactly() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin);
+        token::StellarAssetClient::new(&env, &tok).mint(&payer, &10_000i128);
+        let r = Address::generate(&env);
+        let dl = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [r]),
+            &Vec::from_array(&env, [1000i128]),
+            &Vec::from_array(&env, [tok]),
+            &dl,
+            &opts(&env),
+        );
+        client.pay(&payer, &id, &400i128);
+        client.pay(&payer, &id, &300i128);
+        assert_eq!(client.get_invoice(&id).funded, 700i128);
+        assert_eq!(client.get_payer_total(&id, &payer), 700i128);
+    }
+
+    #[test]
+    fn test_full_pay_releases_with_exact_distribution() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin);
+        token::StellarAssetClient::new(&env, &tok).mint(&payer, &10_000i128);
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let dl = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [r1, r2]),
+            &Vec::from_array(&env, [600i128, 400i128]),
+            &Vec::from_array(&env, [tok.clone(), tok]),
+            &dl,
+            &opts(&env),
+        );
+        client.pay(&payer, &id, &1000i128);
+        let inv = client.get_invoice(&id);
+        assert_eq!(inv.status, InvoiceStatus::Released);
+        assert_eq!(inv.funded, 1000i128);
+        let preview = client.preview_payout(&id, &1000i128);
+        assert_eq!(preview.get(0).unwrap() + preview.get(1).unwrap(), 1000i128);
+    }
+
+    #[test]
+    fn test_tranche_cumulative_caps_exactly_at_full() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r = Address::generate(&env);
+        let tok = Address::generate(&env);
+        let dl = env.ledger().timestamp() + 86400;
+        let id = client.create_invoice(
+            &creator,
+            &Vec::from_array(&env, [r]),
+            &Vec::from_array(&env, [1000i128]),
+            &Vec::from_array(&env, [tok]),
+            &dl,
+            &opts(&env),
+        );
+        assert_eq!(client.release_tranche(&creator, &id, &3333u32), 3333u32);
+        assert_eq!(client.release_tranche(&creator, &id, &6667u32), 10_000u32);
+        assert_eq!(client.get_released_bps(&id), 10_000u32);
+    }
+
+    #[test]
+    fn test_stream_top_up_then_full_withdraw() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&77u64, &r, &1000i128, &start, &(start + 1000), &start);
+        assert_eq!(client.top_up_stream(&77u64, &r, &500i128), 1500i128);
+        env.ledger().set_timestamp(start + 1001);
+        assert_eq!(client.withdraw_vested(&77u64, &r), 1500i128);
+    }
+
+    #[test]
+    fn test_fee_math_exact_on_large_amount() {
+        let (env, client) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&10_000u32, &collector);
+        assert_eq!(client.preview_fee(&1_000_000i128), 1_000_000i128);
+        client.set_protocol_fee(&1u32, &collector);
+        assert_eq!(client.preview_fee(&10_000i128), 1i128);
+    }
+}
+
