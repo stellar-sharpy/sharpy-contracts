@@ -4,7 +4,7 @@
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
 ![Tests](https://img.shields.io/badge/tests-184%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.2.0-6C63FF)
+![Version](https://img.shields.io/badge/version-0.3.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
 
 Soroban smart contract powering the Sharpy split payment protocol on Stellar. Handles invoice creation, multi-recipient fund distribution, escrow management, recurring billing, and agentic payment integration.
@@ -18,7 +18,7 @@ Soroban smart contract powering the Sharpy split payment protocol on Stellar. Ha
 
 | Network | Contract ID | Status |
 |---------|-------------|--------|
-| Testnet | `CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T` | Live (2026-09-04, 184-test build) |
+| Testnet | `CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T` | Live (v0.3.0, 2026-09-04, 184-test build) |
 | Mainnet | Coming soon | Pending |
 
 - [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T)
@@ -210,6 +210,9 @@ make deploy-mainnet # deploy to mainnet
 | soroban-sdk | Protocol | Status |
 |-------------|----------|--------|
 | 26.1.0 | 27 | Current |
+
+Crate `sharpy` is 0.3.0 (`contracts/sharpy/Cargo.toml`). On-chain schema versions are
+independent: `get_contract_version()` returns 1 and `get_invoice_version(id)` returns 1.
 
 ---
 
