@@ -710,6 +710,19 @@ impl SharpyContract {
         env.storage().persistent().extend_ttl(&invoice_key(invoice_id), 100_000, 6_307_200);
     }
 
+    /// Seconds until `deadline` for a Pending invoice — 0 when expired or terminal.
+    /// Pure observability view (no state change, no events) for long-lived invoice
+    /// dashboards: poll alongside `is_invoice_expired` and submit `bump_invoice_ttl`
+    /// (storage keep-alive) or `extend_deadline` (push the deadline out) while the
+    /// hint is still comfortably positive. Terminal invoices return 0 — nothing to bump.
+    pub fn get_ttl_hint(env: Env, invoice_id: u64) -> u64 {
+        let invoice = load_invoice(&env, invoice_id);
+        if invoice.status != InvoiceStatus::Pending {
+            return 0;
+        }
+        invoice.deadline.saturating_sub(env.ledger().timestamp())
+    }
+
     /// Returns the exact per-recipient payout amounts for a given payment amount,
     /// using the same proportional and dust logic as `_release`.
     /// Pure read — no state is modified.
