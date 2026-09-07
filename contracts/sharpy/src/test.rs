@@ -4930,3 +4930,78 @@ mod test_edge_streaming_cliff {
     }
 }
 
+#[cfg(test)]
+mod test_edge_routing {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [100i128]),
+            &Vec::from_array(env, [tok]),
+            &dl,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_route_overwrite_latest_wins() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        let id3 = mk(&env, &client, &creator);
+        client.set_route(&creator, &id1, &id2);
+        assert_eq!(client.resolve_route(&id1), id2);
+        client.set_route(&creator, &id1, &id3);
+        assert_eq!(client.get_route(&id1).unwrap().target_invoice, id3);
+        assert_eq!(client.resolve_route(&id1), id3);
+    }
+
+    #[test]
+    #[should_panic(expected = "invoice not found")]
+    fn test_route_to_missing_invoice_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        client.set_route(&creator, &id1, &999_999u64);
+    }
+
+    #[test]
+    fn test_resolve_follows_single_hop_only() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id1 = mk(&env, &client, &creator);
+        let id2 = mk(&env, &client, &creator);
+        let id3 = mk(&env, &client, &creator);
+        client.set_route(&creator, &id1, &id2);
+        client.set_route(&creator, &id2, &id3);
+        assert_eq!(client.resolve_route(&id1), id2);
+        assert_eq!(client.resolve_route(&id2), id3);
+        assert_eq!(client.resolve_route(&id3), id3);
+    }
+}
+
