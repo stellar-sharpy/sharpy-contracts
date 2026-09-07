@@ -4673,3 +4673,74 @@ mod test_fee_estimate_totals {
     }
 }
 
+#[cfg(test)]
+mod test_ttl_hint {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env, Vec};
+    use crate::{types::InvoiceStatus, SharpyContractClient};
+
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address, deadline: u64) -> u64 {
+        let opts = crate::types::InvoiceOptions {
+            escrow_enabled: false,
+            escrow_release_delay: None,
+            split_rules: Vec::new(env),
+            auto_resolve_rules: Vec::new(env),
+            arbitrator: None,
+        };
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        client.create_invoice(
+            creator,
+            &Vec::from_array(env, [r]),
+            &Vec::from_array(env, [1000i128]),
+            &Vec::from_array(env, [tok]),
+            &deadline,
+            &opts,
+        )
+    }
+
+    #[test]
+    fn test_ttl_hint_counts_down_to_deadline() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let id = mk(&env, &client, &creator, now + 1000);
+        assert_eq!(client.get_ttl_hint(&id), 1000u64);
+        env.ledger().set_timestamp(now + 400);
+        assert_eq!(client.get_ttl_hint(&id), 600u64);
+    }
+
+    #[test]
+    fn test_ttl_hint_zero_when_expired() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let id = mk(&env, &client, &creator, now + 1000);
+        env.ledger().set_timestamp(now + 1001);
+        assert_eq!(client.get_ttl_hint(&id), 0u64);
+        assert!(client.is_invoice_expired(&id));
+    }
+
+    #[test]
+    fn test_ttl_hint_zero_for_terminal_invoice() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let id = mk(&env, &client, &creator, now + 1000);
+        env.ledger().set_timestamp(now + 1001);
+        client.refund(&id);
+        assert_eq!(client.get_invoice(&id).status, InvoiceStatus::Refunded);
+        assert_eq!(client.get_ttl_hint(&id), 0u64);
+    }
+}
+
