@@ -362,7 +362,10 @@ impl SharpyContract {
         assert!(!invoice.frozen, "invoice is frozen");
 
         let total: i128 = invoice.amounts.iter().sum();
-        let remaining = total - invoice.funded;
+        // Audit (closes #181): checked ops — same panic behavior as profile
+        // overflow-checks, with labeled messages. `remaining` is non-negative on
+        // all reachable states (funded <= total invariant).
+        let remaining = total.checked_sub(invoice.funded).expect("pay: underflow in total - funded");
         if amount > remaining {
             panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", amount, remaining);
         }
@@ -371,7 +374,7 @@ impl SharpyContract {
         token_client.transfer(&payer, &env.current_contract_address(), &amount);
 
         invoice.payments.push_back(Payment { payer: payer.clone(), amount, tip: 0 });
-        invoice.funded += amount;
+        invoice.funded = invoice.funded.checked_add(amount).expect("pay: overflow in funded + amount");
         index_invoice_for_payer(&env, &payer, invoice_id);
         append_audit(&env, invoice_id, symbol_short!("pay"), &payer);
         events::payment_received(&env, invoice_id, &payer, amount);
@@ -403,13 +406,13 @@ impl SharpyContract {
             assert!(inv.status == InvoiceStatus::Pending, "invoice is not pending");
             assert!(p.amount > 0, "payment amount must be positive");
             let inv_total: i128 = inv.amounts.iter().sum();
-            let remaining = inv_total - inv.funded;
-            if inv.funded + p.amount > inv_total {
+            let remaining = inv_total.checked_sub(inv.funded).expect("pool_pay: underflow in total - funded");
+            if inv.funded.checked_add(p.amount).expect("pool_pay: overflow in funded + amount") > inv_total {
                 panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", p.amount, remaining);
             }
             let token = inv.tokens.get(0).expect("no token");
             let prev = token_totals.get(token.clone()).unwrap_or(0);
-            token_totals.set(token, prev + p.amount);
+            token_totals.set(token, prev.checked_add(p.amount).expect("pool_pay: overflow in token total"));
         }
 
         // Phase 2: Transfer tokens — one transfer per unique token
@@ -422,7 +425,7 @@ impl SharpyContract {
         for p in payments.iter() {
             let mut inv = load_invoice(&env, p.invoice_id);
             inv.payments.push_back(Payment { payer: payer.clone(), amount: p.amount, tip: 0 });
-            inv.funded += p.amount;
+            inv.funded = inv.funded.checked_add(p.amount).expect("pool_pay: overflow in funded + amount");
             index_invoice_for_payer(&env, &payer, p.invoice_id);
             append_audit(&env, p.invoice_id, symbol_short!("pool_pay"), &payer);
             events::payment_received(&env, p.invoice_id, &payer, p.amount);
@@ -962,7 +965,8 @@ impl SharpyContract {
         assert!(!invoice.frozen, "invoice is frozen");
 
         let total: i128 = invoice.amounts.iter().sum();
-        let remaining = total - invoice.funded;
+        // Audit (closes #181): checked ops, same behavior as pay().
+        let remaining = total.checked_sub(invoice.funded).expect("pay_with_tip: underflow in total - funded");
         if amount > remaining {
             panic!("payment exceeds remaining balance: payment of {} exceeds remaining {}", amount, remaining);
         }
@@ -979,7 +983,7 @@ impl SharpyContract {
         }
 
         invoice.payments.push_back(Payment { payer: payer.clone(), amount, tip });
-        invoice.funded += amount;
+        invoice.funded = invoice.funded.checked_add(amount).expect("pay_with_tip: overflow in funded + amount");
         index_invoice_for_payer(&env, &payer, invoice_id);
         append_audit(&env, invoice_id, symbol_short!("pay"), &payer);
         events::payment_received(&env, invoice_id, &payer, amount);
