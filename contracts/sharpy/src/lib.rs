@@ -781,6 +781,9 @@ impl SharpyContract {
     /// `limit` caps the page size (0 yields an empty page); `offset` skips that
     /// many entries (past-the-end yields an empty page). Index order is creation
     /// order. The unpaginated `get_invoices_by_creator` is unchanged.
+    /// Bounds contract: all `(limit, offset)` inputs are total — this view never
+    /// panics on out-of-range pages; it returns an empty or truncated page.
+    /// Dashboards should page with `offset += limit` until a short page arrives.
     pub fn get_creator_invoices_paged(env: Env, creator: Address, limit: u32, offset: u32) -> Vec<u64> {
         let ids: Vec<u64> = env.storage()
             .persistent()
@@ -902,7 +905,8 @@ impl SharpyContract {
     /// Returns one page of invoice IDs that `payer` has paid toward.
     /// Same `limit`/`offset` guards as the creator variant: 0 limit or
     /// past-the-end offset yields an empty page. The unpaginated
-    /// `get_invoices_by_payer` is unchanged.
+    /// `get_invoices_by_payer` is unchanged. Order follows first-payment
+    /// indexing (deduplicated per invoice).
     pub fn get_payer_invoices_paged(env: Env, payer: Address, limit: u32, offset: u32) -> Vec<u64> {
         let ids: Vec<u64> = env.storage()
             .persistent()
