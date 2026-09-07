@@ -1061,6 +1061,15 @@ impl SharpyContract {
         count
     }
 
+    /// Read-only deadline-expiry check mirroring the `refund`/`refund_batch` trigger.
+    /// Returns true only when the invoice is still Pending and `timestamp > deadline`.
+    /// Pure view — emits no events. Indexers and UIs should poll this to decide
+    /// when to submit `refund`; the `expired` event fires on the refund itself.
+    pub fn is_invoice_expired(env: Env, invoice_id: u64) -> bool {
+        let invoice = load_invoice(&env, invoice_id);
+        invoice.status == InvoiceStatus::Pending && env.ledger().timestamp() > invoice.deadline
+    }
+
     /// Extend invoice deadline — creator only, only Pending, new_deadline must be > old and > now.
     pub fn extend_deadline(env: Env, caller: Address, invoice_id: u64, new_deadline: u64) {
         require_not_paused(&env);
