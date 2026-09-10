@@ -846,6 +846,19 @@ impl SharpyContract {
         paginate_ids(&env, ids, limit, offset)
     }
 
+    /// Total invoices created by `creator` (matches `get_invoices_by_creator(...).len()`).
+    /// O(1) read for dashboards: fetch the total once, then page with
+    /// `get_creator_invoices_paged` until a short page arrives.
+    pub fn get_creator_invoice_total(env: Env, creator: Address) -> u32 {
+        env.storage().persistent().get::<(Symbol, Address), Vec<u64>>(&creator_index_key(&creator)).map(|v| v.len()).unwrap_or(0)
+    }
+
+    /// Total invoices paid by `payer` (matches `get_invoices_by_payer(...).len()`).
+    /// Pairs with `get_payer_invoices_paged` the same way the creator total does.
+    pub fn get_payer_invoice_total(env: Env, payer: Address) -> u32 {
+        env.storage().persistent().get::<(Symbol, Address), Vec<u64>>(&payer_index_key(&payer)).map(|v| v.len()).unwrap_or(0)
+    }
+
     /// Returns the claimable balance for a given account and token.
     /// Balances accumulate when recipient transfers fail during invoice release.
     /// Returns 0 if no balance exists.
