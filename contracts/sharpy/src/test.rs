@@ -6519,3 +6519,41 @@ mod test_release_proof_b {
         assert_eq!(client.preview_vested(&91091u64), 0i128);
     }
 }
+
+#[cfg(test)]
+mod test_release_proof_c {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    #[test]
+    fn test_treasury_and_fee_config_proof() {
+        let (env, client) = setup();
+        let treasury = client.get_treasury();
+        let _ = treasury;
+        assert!(client.get_protocol_fee().is_none());
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&100u32, &collector);
+        assert_eq!(client.preview_fee(&1000i128), 10i128);
+    }
+    #[test]
+    fn test_invoice_count_increments() {
+        let (env, client) = setup();
+        let c0 = client.get_invoice_count();
+        let creator = Address::generate(&env);
+        let r = Address::generate(&env);
+        let tok = Address::generate(&env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
+        let _ = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [10i128]), &Vec::from_array(&env, [tok]), &dl, &opts);
+        assert_eq!(client.get_invoice_count(), c0 + 1);
+    }
+}
