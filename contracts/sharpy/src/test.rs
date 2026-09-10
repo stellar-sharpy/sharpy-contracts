@@ -5315,3 +5315,41 @@ mod test_stream_preview_b {
         assert_eq!(st.vested, 1000i128);
     }
 }
+
+#[cfg(test)]
+mod test_stream_preview_c {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    #[test]
+    fn test_topup_preview_consistency() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&905u64, &r, &1000i128, &start, &(start + 1000), &start);
+        assert_eq!(client.top_up_stream(&905u64, &r, &500i128), 1500i128);
+        env.ledger().set_timestamp(start + 1001);
+        assert_eq!(client.preview_vested(&905u64), 1500i128);
+        assert_eq!(client.withdraw_vested(&905u64, &r), 1500i128);
+    }
+    #[test]
+    fn test_get_state_none_and_some() {
+        let (env, client) = setup();
+        assert!(client.get_stream_state(&99991u64).is_none());
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&906u64, &r, &700i128, &start, &(start + 700), &start);
+        let st = client.get_stream_state(&906u64).unwrap();
+        assert_eq!(st.amount, 700i128);
+        assert_eq!(st.vested, 0i128);
+    }
+}
