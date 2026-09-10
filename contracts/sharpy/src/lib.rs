@@ -1467,7 +1467,15 @@ impl SharpyContract {
         env.storage().instance().get(&fee_key())
     }
 
+    /// Current fee rate in bps (0 when unset). Pure view so dashboards can
+    /// render the rate without fetching the full `FeeConfig`.
+    pub fn get_fee_bps(env: Env) -> u32 {
+        env.storage().instance().get::<Symbol, FeeConfig>(&fee_key()).map(|c| c.fee_bps).unwrap_or(0)
+    }
+
     /// Preview the protocol fee owed on `amount` (pure query, no state change).
+    /// Emits `fprev` for indexer visibility; for a silent estimate on an invoice
+    /// total see `preview_fee_for_invoice` — both share `calc_protocol_fee` math.
     pub fn preview_fee(env: Env, amount: i128) -> i128 {
         let fee = calc_protocol_fee(&env, amount);
         events::fee_previewed(&env, amount, fee);

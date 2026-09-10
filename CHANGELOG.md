@@ -3,6 +3,7 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
+- feat(contract): `get_fee_bps()` rate view + preview-vs-invoice consistency proof (emitting vs silent share math, release untouched) — feat/fee-consistency (closes #195)
 - feat(contract): whitelist enforced uniformly in `pay`/`pay_with_tip`/`pool_pay` + `is_whitelisted_payer(id, payer)` view; `require!` message consistency — feat/whitelist-consistency (closes #194)
 - feat(contract): `get_tranche_remaining_bps(id)` view + cumulative-bps invariant (`released + remaining == 10000`) — feat/tranche-remaining (closes #193)
 - feat(contract): `resolve_route_chain(id, max_depth)` bounded follower + `get_route_chain_len(id)` cycle-safe depth view — feat/route-chain-depth (closes #192)
