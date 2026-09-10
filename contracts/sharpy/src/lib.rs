@@ -695,6 +695,13 @@ impl SharpyContract {
         load_invoice(&env, invoice_id)
     }
 
+    /// Number of audit entries for `invoice_id` (0 when none).
+    /// Pairs with `get_audit_log`: cheap length check for emission-coverage
+    /// assertions — every mutator that appends an audit entry bumps this count.
+    pub fn get_audit_count(env: Env, invoice_id: u64) -> u32 {
+        env.storage().persistent().get::<(Symbol,u64), Vec<AuditEntry>>(&audit_log_key(invoice_id)).map(|v| v.len()).unwrap_or(0)
+    }
+
     pub fn get_audit_log(env: Env, invoice_id: u64) -> Vec<AuditEntry> {
         env.storage().persistent().get(&audit_log_key(invoice_id)).unwrap_or_else(|| Vec::new(&env))
     }
