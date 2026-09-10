@@ -832,6 +832,7 @@ impl SharpyContract {
     }
 
     /// Returns one page of invoice IDs created by `creator`.
+    /// Pair with `get_creator_invoice_total` for total-aware paging.
     /// `limit` caps the page size (0 yields an empty page); `offset` skips that
     /// many entries (past-the-end yields an empty page). Index order is creation
     /// order. The unpaginated `get_invoices_by_creator` is unchanged.
@@ -844,6 +845,19 @@ impl SharpyContract {
             .get(&creator_index_key(&creator))
             .unwrap_or_else(|| Vec::new(&env));
         paginate_ids(&env, ids, limit, offset)
+    }
+
+    /// Total invoices created by `creator` (matches `get_invoices_by_creator(...).len()`).
+    /// O(1) read for dashboards: fetch the total once, then page with
+    /// `get_creator_invoices_paged` until a short page arrives.
+    pub fn get_creator_invoice_total(env: Env, creator: Address) -> u32 {
+        env.storage().persistent().get::<(Symbol, Address), Vec<u64>>(&creator_index_key(&creator)).map(|v| v.len()).unwrap_or(0)
+    }
+
+    /// Total invoices paid by `payer` (matches `get_invoices_by_payer(...).len()`).
+    /// Pairs with `get_payer_invoices_paged` the same way the creator total does.
+    pub fn get_payer_invoice_total(env: Env, payer: Address) -> u32 {
+        env.storage().persistent().get::<(Symbol, Address), Vec<u64>>(&payer_index_key(&payer)).map(|v| v.len()).unwrap_or(0)
     }
 
     /// Returns the claimable balance for a given account and token.
