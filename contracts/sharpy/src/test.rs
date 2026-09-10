@@ -5443,3 +5443,52 @@ mod test_route_chain_b {
         assert_eq!(client.resolve_route_chain(&a, &1u32), b);
     }
 }
+
+#[cfg(test)]
+mod test_route_chain_c {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn opts(env: &Env) -> crate::types::InvoiceOptions {
+        crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None }
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts(env))
+    }
+    #[test]
+    fn test_chain_depth_cap_truncates() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let a = mk(&env, &client, &creator);
+        let b = mk(&env, &client, &creator);
+        let c = mk(&env, &client, &creator);
+        client.set_route(&creator, &a, &b);
+        client.set_route(&creator, &b, &c);
+        assert_eq!(client.resolve_route_chain(&a, &1u32), b);
+        assert_eq!(client.get_route_chain_len(&a), 2u32);
+    }
+    #[test]
+    fn test_chain_overwrite_latest_wins() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let a = mk(&env, &client, &creator);
+        let b = mk(&env, &client, &creator);
+        let c = mk(&env, &client, &creator);
+        client.set_route(&creator, &a, &b);
+        client.set_route(&creator, &a, &c);
+        assert_eq!(client.resolve_route(&a), c);
+        assert_eq!(client.resolve_route_chain(&a, &5u32), c);
+    }
+}
