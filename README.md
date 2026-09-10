@@ -2,7 +2,7 @@
 
 ![Soroban](https://img.shields.io/badge/Soroban-Protocol%2027-6C63FF?logo=stellar)
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
-![Tests](https://img.shields.io/badge/tests-184%20passing-00D4AA)
+![Tests](https://img.shields.io/badge/tests-292%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/badge/version-0.3.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
@@ -18,7 +18,7 @@ Soroban smart contract powering the Sharpy split payment protocol on Stellar. Ha
 
 | Network | Contract ID | Status |
 |---------|-------------|--------|
-| Testnet | `CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T` | Live (v0.3.0, 2026-09-04, 184-test build) |
+| Testnet | `CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T` | Live (v0.3.0, 2026-09-04, 184-test build; 292-test `main` pending redeploy) |
 | Mainnet | Coming soon | Pending |
 
 - [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T)
