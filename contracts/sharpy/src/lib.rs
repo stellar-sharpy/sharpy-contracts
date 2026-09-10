@@ -1350,7 +1350,9 @@ impl SharpyContract {
             }
         }
         let unvested = state.amount.checked_sub(state.vested).expect("stream: underflow in amount - vested");
-        let withdraw_amount = total_vested.min(unvested).max(0i128);
+        // Time-accounting edge: subtract already-vested so repeat withdraws at the
+        // same timestamp are no-ops instead of double-counting total_vested.
+        let withdraw_amount = total_vested.saturating_sub(state.vested).min(unvested).max(0i128);
         state.vested = state.vested.checked_add(withdraw_amount).expect("stream: overflow in vested + withdraw");
         env.storage().persistent().set(&key, &state);
         let rc = recipient.clone();
@@ -1527,6 +1529,32 @@ impl SharpyContract {
         env.storage().persistent().set(&whitelist_key(invoice_id), &state);
         events::whitelist_payer_removed(&env, invoice_id, &rc);
         events::invoice_updated(&env, invoice_id, &caller);
+    }
+
+    /// Return the streaming state for `invoice_id`, if any.
+    /// Pure view for dashboards: exposes cliff-gated vesting params plus
+    /// already-vested accounting without mutating state or emitting events.
+    pub fn get_stream_state(env: Env, invoice_id: u64) -> Option<StreamingState> {
+        env.storage().persistent().get::<(Symbol,u64), StreamingState>(&streaming_key(invoice_id))
+    }
+
+    /// Pure preview of the currently withdrawable vested amount.
+    /// Mirrors `withdraw_vested` cliff-gated linear math exactly
+    /// (`amount * elapsed / duration`, capped by unvested remainder) but
+    /// performs no state change and emits no events. Poll before submitting
+    /// `withdraw_vested`; a 0 preview means nothing is claimable yet.
+    pub fn preview_vested(env: Env, invoice_id: u64) -> i128 {
+        let state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&streaming_key(invoice_id)).expect("no stream");
+        let now = env.ledger().timestamp();
+        let mut total_vested = 0i128;
+        if now >= state.cliff_at {
+            let total_duration = state.end_at.saturating_sub(state.start_at);
+            let elapsed = now.saturating_sub(state.start_at);
+            if total_duration > 0 {
+                total_vested = state.amount.checked_mul(elapsed as i128).expect("stream: overflow in amount * elapsed").checked_div(total_duration as i128).expect("stream: division failed").max(0i128);
+            }
+        }
+        total_vested.saturating_sub(state.vested).min(state.amount.checked_sub(state.vested).expect("stream: underflow")).max(0i128)
     }
 }
 
