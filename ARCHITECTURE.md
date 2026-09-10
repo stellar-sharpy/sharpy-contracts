@@ -136,6 +136,9 @@ All events use single-element topic `symbol_short!`.
 | `wrem` | `WhitelistPayerRemovedEvent{invoice_id, payer}` | `remove_whitelisted_payer` |
 | `fee` | `FeeConfiguredEvent{fee_bps, collector}` | `set_protocol_fee` |
 | `fprev` | `FeePreviewedEvent{amount, fee}` | `preview_fee` |
+| `paged` | _(no event; views)_ `get_creator_invoices_paged`/`get_payer_invoices_paged` + `*_total` | paged reads |
+| `ttl` | _(no event; views)_ `get_ttl_hint`/`is_invoice_expired`/`is_invoice_terminal` | ttl reads |
+| `audit` | _(no event; views)_ `get_audit_count`/`get_funding_remaining`/`get_fee_bps` | invariant reads |
 
 ## Checked Arithmetic (CAP-82)
 
@@ -152,7 +155,7 @@ All payout math uses `checked_mul`/`checked_div`/`checked_add`/`checked_sub` to 
 - `contracts/sharpy/src/lib.rs` — contract impl, storage helpers, `SharpyContract`
 - `contracts/sharpy/src/events.rs` — typed event helpers
 - `contracts/sharpy/src/types.rs` — `Invoice`, `SplitRule`, `DisputeState`, etc.
-- `contracts/sharpy/src/test.rs` — 184 unit/integration tests
+- `contracts/sharpy/src/test.rs` — 280+ unit/integration tests (stream/route/tranche/whitelist/fee/pagination/ttl/invariant suites)
 
 ## Auth Matrix (audit harness, closes #199)
 
