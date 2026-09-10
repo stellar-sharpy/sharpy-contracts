@@ -5851,3 +5851,35 @@ mod test_fee_consistency_b {
         assert_eq!(a, 200i128);
     }
 }
+
+#[cfg(test)]
+mod test_fee_consistency_c {
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    #[test]
+    fn test_full_bps_equals_amount() {
+        let (env, client) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&10_000u32, &collector);
+        assert_eq!(client.preview_fee(&12345i128), 12345i128);
+        assert_eq!(client.get_fee_bps(), 10_000u32);
+    }
+    #[test]
+    fn test_truncation_rounds_down() {
+        let (env, client) = setup();
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&100u32, &collector);
+        assert_eq!(client.preview_fee(&1i128), 0i128);
+        assert_eq!(client.preview_fee(&10_000i128), 100i128);
+    }
+}
