@@ -832,6 +832,7 @@ impl SharpyContract {
     }
 
     /// Returns one page of invoice IDs created by `creator`.
+    /// Pair with `get_creator_invoice_total` for total-aware paging.
     /// `limit` caps the page size (0 yields an empty page); `offset` skips that
     /// many entries (past-the-end yields an empty page). Index order is creation
     /// order. The unpaginated `get_invoices_by_creator` is unchanged.
