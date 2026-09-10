@@ -6023,3 +6023,141 @@ mod test_paged_total_c {
         assert_eq!(page.len(), 1u32);
     }
 }
+
+#[cfg(test)]
+mod test_ttl_terminal_a {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address, dl: u64) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    fn test_countdown_exact() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let id = mk(&env, &client, &creator, now + 1000);
+        assert_eq!(client.get_ttl_hint(&id), 1000u64);
+        assert!(!client.is_invoice_terminal(&id));
+        assert!(!client.is_invoice_expired(&id));
+    }
+    #[test]
+    fn test_expired_pending_hint_zero_and_refundable() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let id = mk(&env, &client, &creator, now + 10);
+        env.ledger().set_timestamp(now + 11);
+        assert_eq!(client.get_ttl_hint(&id), 0u64);
+        assert!(client.is_invoice_expired(&id));
+        assert!(!client.is_invoice_terminal(&id));
+    }
+}
+
+#[cfg(test)]
+mod test_ttl_terminal_b {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, token, Address, Env, Vec};
+    use crate::{types::InvoiceStatus, SharpyContractClient};
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    #[test]
+    fn test_released_terminal_hint_zero() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin);
+        token::StellarAssetClient::new(&env, &tok).mint(&payer, &5000i128);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
+        let r = Address::generate(&env);
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [1000i128]), &Vec::from_array(&env, [tok]), &dl, &opts);
+        client.pay(&payer, &id, &1000i128);
+        assert_eq!(client.get_invoice(&id).status, InvoiceStatus::Released);
+        assert_eq!(client.get_ttl_hint(&id), 0u64);
+        assert!(client.is_invoice_terminal(&id));
+        assert!(!client.is_invoice_expired(&id));
+    }
+    #[test]
+    fn test_cancelled_terminal_hint_zero() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r = Address::generate(&env);
+        let tok = Address::generate(&env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &opts);
+        client.cancel_invoice(&creator, &id);
+        assert_eq!(client.get_ttl_hint(&id), 0u64);
+        assert!(client.is_invoice_terminal(&id));
+    }
+}
+
+#[cfg(test)]
+mod test_ttl_terminal_c {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, token, Address, Env, Vec};
+    use crate::{types::InvoiceStatus, SharpyContractClient};
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    #[test]
+    fn test_refunded_terminal_hint_zero() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin);
+        token::StellarAssetClient::new(&env, &tok).mint(&payer, &2000i128);
+        let now = env.ledger().timestamp();
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
+        let r = Address::generate(&env);
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [1000i128]), &Vec::from_array(&env, [tok]), &(now + 10), &opts);
+        client.pay(&payer, &id, &400i128);
+        env.ledger().set_timestamp(now + 11);
+        client.refund(&id);
+        assert_eq!(client.get_invoice(&id).status, InvoiceStatus::Refunded);
+        assert_eq!(client.get_ttl_hint(&id), 0u64);
+        assert!(client.is_invoice_terminal(&id));
+    }
+    #[test]
+    fn test_extend_revives_hint() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r = Address::generate(&env);
+        let tok = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &(now + 100), &opts);
+        client.extend_deadline(&creator, &id, &(now + 1000));
+        assert_eq!(client.get_ttl_hint(&id), 1000u64);
+        assert!(!client.is_invoice_expired(&id));
+    }
+}
