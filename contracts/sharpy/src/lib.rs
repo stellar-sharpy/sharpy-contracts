@@ -1560,6 +1560,8 @@ impl SharpyContract {
         cur
     }
 
+    /// Chain-length helper pairs with `resolve_route_chain`: dashboards can
+    /// assert `get_route_chain_len <= max_depth` before resolving.
     /// Number of hops reachable from `invoice_id` (cycle-safe, capped at 32).
     /// 0 when unrouted. Pure view for dashboards validating chain length.
     pub fn get_route_chain_len(env: Env, invoice_id: u64) -> u32 {
