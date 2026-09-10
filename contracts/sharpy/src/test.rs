@@ -5621,3 +5621,45 @@ mod test_tranche_invariant_c {
         client.release_tranche(&other, &id, &100u32);
     }
 }
+
+#[cfg(test)]
+mod test_wl_consistency_a {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address, payer: &Address, amt: i128) -> u64 {
+        let admin = Address::generate(env);
+        let tok = env.register_stellar_asset_contract(admin.clone());
+        token::StellarAssetClient::new(env, &tok).mint(payer, &(amt * 2));
+        let r = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [amt]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    fn test_view_open_when_no_list() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let id = mk(&env, &client, &creator, &payer, 1000i128);
+        assert!(client.is_whitelisted_payer(&id, &payer));
+    }
+    #[test]
+    fn test_view_empty_means_open() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let id = mk(&env, &client, &creator, &payer, 1000i128);
+        client.set_whitelist(&creator, &id, &Vec::new(&env));
+        assert!(client.is_whitelisted_payer(&id, &payer));
+    }
+}
