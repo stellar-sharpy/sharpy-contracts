@@ -1528,6 +1528,13 @@ impl SharpyContract {
         events::whitelist_payer_removed(&env, invoice_id, &rc);
         events::invoice_updated(&env, invoice_id, &caller);
     }
+
+    /// Return the streaming state for `invoice_id`, if any.
+    /// Pure view for dashboards: exposes cliff-gated vesting params plus
+    /// already-vested accounting without mutating state or emitting events.
+    pub fn get_stream_state(env: Env, invoice_id: u64) -> Option<StreamingState> {
+        env.storage().persistent().get::<(Symbol,u64), StreamingState>(&streaming_key(invoice_id))
+    }
 }
 
 /// Validates that a token address is not the zero address.
