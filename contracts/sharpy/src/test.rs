@@ -6522,7 +6522,7 @@ mod test_release_proof_b {
 
 #[cfg(test)]
 mod test_release_proof_c {
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
     use crate::SharpyContractClient;
     fn setup() -> (Env, SharpyContractClient<'static>) {
         let env = Env::default();
