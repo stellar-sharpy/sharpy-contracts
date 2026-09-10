@@ -6161,3 +6161,137 @@ mod test_ttl_terminal_c {
         assert!(!client.is_invoice_expired(&id));
     }
 }
+
+#[cfg(test)]
+mod test_invupd_a {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec, String};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    fn test_tags_path_writes_state_and_audit() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        let before = client.get_audit_count(&id);
+        client.set_invoice_tags(&creator, &id, &Vec::from_array(&env, [String::from_str(&env, "alpha")]));
+        assert_eq!(client.get_invoice_tags(&id).unwrap().tags.len(), 1u32);
+        assert_eq!(client.get_audit_count(&id), before + 1);
+    }
+    #[test]
+    fn test_notes_path_writes_state_and_audit() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        let before = client.get_audit_count(&id);
+        client.set_invoice_notes(&creator, &id, &String::from_str(&env, "hello"));
+        assert!(client.get_invoice_notes(&id).is_some());
+        assert_eq!(client.get_audit_count(&id), before + 1);
+    }
+}
+
+#[cfg(test)]
+mod test_invupd_b {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec, String};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    fn test_memo_path_writes_state_and_audit() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        let before = client.get_audit_count(&id);
+        client.set_invoice_memo_ext(&creator, &id, &String::from_str(&env, "memo-1"));
+        assert!(client.get_invoice_memo_ext(&id).is_some());
+        assert_eq!(client.get_audit_count(&id), before + 1);
+    }
+    #[test]
+    fn test_metadata_path_writes_state_and_audit() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        let before = client.get_audit_count(&id);
+        client.set_invoice_metadata(&creator, &id, &Vec::from_array(&env, [String::from_str(&env, "k:v")]));
+        assert!(client.get_invoice_metadata(&id).is_some());
+        assert_eq!(client.get_audit_count(&id), before + 1);
+    }
+}
+
+#[cfg(test)]
+mod test_invupd_c {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    fn test_discount_and_deadline_paths_audit() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        let b0 = client.get_audit_count(&id);
+        client.set_discount(&creator, &id, &500u32);
+        assert_eq!(client.get_discount(&id).unwrap().discount_bps, 500u32);
+        assert_eq!(client.get_audit_count(&id), b0 + 1);
+        let b1 = client.get_audit_count(&id);
+        client.extend_deadline(&creator, &id, &(env.ledger().timestamp() + 99999));
+        assert_eq!(client.get_audit_count(&id), b1 + 1);
+    }
+    #[test]
+    fn test_whitelist_mutations_bump_audit() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        let b0 = client.get_audit_count(&id);
+        client.set_whitelist(&creator, &id, &Vec::from_array(&env, [payer.clone()]));
+        assert_eq!(client.get_audit_count(&id), b0 + 1);
+        client.remove_whitelisted_payer(&creator, &id, &payer);
+        assert_eq!(client.get_whitelist(&id).unwrap().payers.len(), 0u32);
+    }
+}

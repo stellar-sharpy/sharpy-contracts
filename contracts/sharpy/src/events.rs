@@ -202,6 +202,8 @@ pub struct InvoiceUpdatedEvent {
 }
 
 /// Emits the `inv_upd` event. Topic: `("inv_upd",)`.
+/// Ordering: field-specific events (`tags`, `memo`, `imeta`, `disc`, `wlist`,
+/// `ext_dead`) fire FIRST, `inv_upd` follows for single-topic invalidation.
 /// Fired on any state-mutating invoice update: freeze/unfreeze, notes, tags,
 /// memo, metadata, discount, whitelist, and deadline extension. Always emitted
 /// AFTER the field-specific event so per-field subscribers see their event first.
