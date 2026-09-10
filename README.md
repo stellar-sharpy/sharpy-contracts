@@ -196,7 +196,7 @@ sharpy-contracts/
 ## Build & Test
 
 ```bash
-make test           # cargo test (184 passing)
+make test           # cargo test (292 passing)
 make build          # build WASM
 make optimize       # optimize WASM with stellar contract optimize
 make deploy-testnet # deploy to testnet
