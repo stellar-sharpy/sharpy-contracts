@@ -695,6 +695,15 @@ impl SharpyContract {
         load_invoice(&env, invoice_id)
     }
 
+    /// Remaining fundable amount (`total - funded`), floored at 0. Pure view.
+    /// Invariant harness: `funded + remaining == total` and `funded <= total`
+    /// always; sequential pays never exceed the remainder (see `pay` guard).
+    pub fn get_funding_remaining(env: Env, invoice_id: u64) -> i128 {
+        let inv = load_invoice(&env, invoice_id);
+        let total: i128 = inv.amounts.iter().sum();
+        total.checked_sub(inv.funded).expect("remaining: underflow").max(0i128)
+    }
+
     /// Number of audit entries for `invoice_id` (0 when none).
     /// Pairs with `get_audit_log`: cheap length check for emission-coverage
     /// assertions — every mutator that appends an audit entry bumps this count.
