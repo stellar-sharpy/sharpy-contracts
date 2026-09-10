@@ -5883,3 +5883,45 @@ mod test_fee_consistency_c {
         assert_eq!(client.preview_fee(&10_000i128), 100i128);
     }
 }
+
+#[cfg(test)]
+mod test_paged_total_a {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    fn test_unknown_totals_zero_and_empty() {
+        let (env, client) = setup();
+        let ghost = Address::generate(&env);
+        assert_eq!(client.get_creator_invoice_total(&ghost), 0u32);
+        assert_eq!(client.get_payer_invoice_total(&ghost), 0u32);
+        assert_eq!(client.get_creator_invoices_paged(&ghost, &10u32, &0u32).len(), 0u32);
+        assert_eq!(client.get_payer_invoices_paged(&ghost, &10u32, &0u32).len(), 0u32);
+    }
+    #[test]
+    fn test_totals_match_unpaginated_len() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        mk(&env, &client, &creator);
+        mk(&env, &client, &creator);
+        mk(&env, &client, &creator);
+        assert_eq!(client.get_invoices_by_creator(&creator).len(), 3u32);
+        assert_eq!(client.get_creator_invoice_total(&creator), 3u32);
+    }
+}
