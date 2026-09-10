@@ -6477,3 +6477,45 @@ mod test_release_proof_a {
         assert!(!client.is_invoice_terminal(&id));
     }
 }
+
+#[cfg(test)]
+mod test_release_proof_b {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    #[test]
+    fn test_event_taxonomy_views_resolve() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r = Address::generate(&env);
+        let tok = Address::generate(&env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
+        let a = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &opts);
+        let b = client.create_invoice(&creator, &Vec::from_array(&env, [Address::generate(&env)]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [Address::generate(&env)]), &dl, &opts);
+        client.set_route(&creator, &a, &b);
+        assert_eq!(client.resolve_route(&a), b);
+        assert_eq!(client.resolve_route_chain(&a, &5u32), b);
+        assert_eq!(client.get_route_chain_len(&a), 1u32);
+        let payer = Address::generate(&env);
+        assert!(client.is_whitelisted_payer(&a, &payer));
+    }
+    #[test]
+    fn test_stream_views_resolve() {
+        let (env, client) = setup();
+        let r = Address::generate(&env);
+        let start = env.ledger().timestamp();
+        client.create_stream(&91091u64, &r, &500i128, &start, &(start + 500), &start);
+        assert!(client.get_stream_state(&91091u64).is_some());
+        assert_eq!(client.preview_vested(&91091u64), 0i128);
+    }
+}
