@@ -3,6 +3,7 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
+- feat(contract): `resolve_route_chain(id, max_depth)` bounded follower + `get_route_chain_len(id)` cycle-safe depth view — feat/route-chain-depth (closes #192)
 - feat(contract): `get_stream_state(id)` + `preview_vested(id)` pure views; `withdraw_vested` repeat-withdraw idempotency fix (`total - vested`), cancel edge docs — feat/stream-vest-preview (closes #191)
 - feat(events): invoice_updated (`inv_upd`) now emitted on `set_discount` and all whitelist mutations (`set/add/remove`), after the field-specific event; `is_invoice_expired(id)` read-only helper mirrors the `refund`/`refund_batch` expiry trigger — feat/event-taxonomy (closes #183)
 - feat(contract): `get_creator_invoices_paged(creator, limit, offset)` + `get_payer_invoices_paged(payer, limit, offset)` with total bounds guards (limit 0 / offset past end yield empty pages); unpaginated index queries unchanged — feat/index-pagination (closes #184)
