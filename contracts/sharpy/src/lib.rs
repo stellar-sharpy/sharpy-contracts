@@ -104,6 +104,7 @@ fn bump_counter(env: &Env) -> u64 {
 }
 
 /// Pay-guard: when a whitelist exists and is non-empty, only listed payers pass.
+/// Enforced identically in `pay`, `pay_with_tip`, and `pool_pay` (closes #194).
 fn require_whitelisted(env: &Env, invoice_id: u64, payer: &Address) {
     if let Some(state) = env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id)) {
         if !state.payers.is_empty() {
