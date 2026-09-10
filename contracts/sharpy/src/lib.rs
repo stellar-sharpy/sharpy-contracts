@@ -1445,6 +1445,7 @@ impl SharpyContract {
     }
 
     /// Cumulative released basis points for `invoice_id` (0 when untouched).
+    /// Invariant: `get_released_bps + get_tranche_remaining_bps == 10000`.
     pub fn get_released_bps(env: Env, invoice_id: u64) -> u32 {
         env.storage().persistent().get::<(Symbol,u64), TrancheState>(&tranche_key(invoice_id)).map(|s| s.released_bps).unwrap_or(0)
     }
