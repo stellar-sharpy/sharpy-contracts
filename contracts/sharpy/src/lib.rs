@@ -104,10 +104,11 @@ fn bump_counter(env: &Env) -> u64 {
 }
 
 /// Pay-guard: when a whitelist exists and is non-empty, only listed payers pass.
+/// Enforced identically in `pay`, `pay_with_tip`, and `pool_pay` (closes #194).
 fn require_whitelisted(env: &Env, invoice_id: u64, payer: &Address) {
     if let Some(state) = env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id)) {
         if !state.payers.is_empty() {
-            assert!(state.payers.contains(payer), "payer not whitelisted");
+            require!(state.payers.contains(payer), "payer not whitelisted");
         }
     }
 }
@@ -402,6 +403,7 @@ impl SharpyContract {
         // Phase 1: Validate all invoices and group totals by token
         let mut token_totals: Map<Address, i128> = Map::new(&env);
         for p in payments.iter() {
+            require_whitelisted(&env, p.invoice_id, &payer);
             let inv = load_invoice(&env, p.invoice_id);
             assert!(inv.status == InvoiceStatus::Pending, "invoice is not pending");
             assert!(p.amount > 0, "payment amount must be positive");
@@ -981,6 +983,7 @@ impl SharpyContract {
     pub fn pay_with_tip(env: Env, payer: Address, invoice_id: u64, amount: i128, tip: i128) {
         require_not_paused(&env);
         payer.require_auth();
+        require_whitelisted(&env, invoice_id, &payer);
         assert!(amount > 0, "payment amount must be positive");
         assert!(tip >= 0, "tip must be non-negative");
 
@@ -1483,6 +1486,16 @@ impl SharpyContract {
         let invoice = load_invoice(&env, invoice_id);
         let total: i128 = invoice.amounts.iter().sum();
         calc_protocol_fee(&env, total)
+    }
+
+    /// True when `payer` may pay `invoice_id`: open when no whitelist exists
+    /// or the list is empty, else only when listed. Pure view mirroring
+    /// `require_whitelisted` enforcement across `pay`/`pay_with_tip`/`pool_pay`.
+    pub fn is_whitelisted_payer(env: Env, invoice_id: u64, payer: Address) -> bool {
+        match env.storage().persistent().get::<(Symbol,u64), WhitelistState>(&whitelist_key(invoice_id)) {
+            None => true,
+            Some(s) => s.payers.is_empty() || s.payers.contains(&payer),
+        }
     }
 
     /// Set the payer whitelist for `invoice_id` (creator-only; empty = open).
