@@ -5925,3 +5925,52 @@ mod test_paged_total_a {
         assert_eq!(client.get_creator_invoice_total(&creator), 3u32);
     }
 }
+
+#[cfg(test)]
+mod test_paged_total_b {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
+    use crate::{types::InvoicePayment, SharpyContractClient};
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    #[test]
+    fn test_limit_zero_and_past_end_empty() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let r = Address::generate(&env);
+        let tok = Address::generate(&env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok]), &dl, &opts);
+        assert_eq!(client.get_creator_invoices_paged(&creator, &0u32, &0u32).len(), 0u32);
+        assert_eq!(client.get_creator_invoices_paged(&creator, &10u32, &99u32).len(), 0u32);
+        assert_eq!(client.get_creator_invoice_total(&creator), 1u32);
+        let _ = id;
+    }
+    #[test]
+    fn test_payer_total_tracks_payments() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin);
+        token::StellarAssetClient::new(&env, &tok).mint(&payer, &10_000i128);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
+        for _ in 0..2 {
+            let r = Address::generate(&env);
+            let id = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [100i128]), &Vec::from_array(&env, [tok.clone()]), &dl, &opts);
+            let p = InvoicePayment { invoice_id: id, amount: 50i128 };
+            client.pool_pay(&payer, &Vec::from_array(&env, [p]));
+        }
+        assert_eq!(client.get_payer_invoice_total(&payer), 2u32);
+        assert_eq!(client.get_invoices_by_payer(&payer).len(), 2u32);
+    }
+}
