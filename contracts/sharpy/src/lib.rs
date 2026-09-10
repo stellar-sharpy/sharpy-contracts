@@ -1547,6 +1547,7 @@ impl SharpyContract {
             payers,
             updated_at: env.ledger().timestamp(),
         });
+        append_audit(&env, invoice_id, symbol_short!("wlist"), &caller);
         events::whitelist_set(&env, invoice_id, count);
         events::invoice_updated(&env, invoice_id, &caller);
     }
@@ -1568,6 +1569,7 @@ impl SharpyContract {
         state.updated_at = env.ledger().timestamp();
         let count = state.payers.len();
         env.storage().persistent().set(&whitelist_key(invoice_id), &state);
+        append_audit(&env, invoice_id, symbol_short!("wlist"), &caller);
         events::whitelist_set(&env, invoice_id, count);
         events::invoice_updated(&env, invoice_id, &caller);
     }
@@ -1588,6 +1590,7 @@ impl SharpyContract {
         state.payers = kept;
         state.updated_at = env.ledger().timestamp();
         env.storage().persistent().set(&whitelist_key(invoice_id), &state);
+        append_audit(&env, invoice_id, symbol_short!("wrem"), &caller);
         events::whitelist_payer_removed(&env, invoice_id, &rc);
         events::invoice_updated(&env, invoice_id, &caller);
     }
