@@ -1436,6 +1436,14 @@ impl SharpyContract {
         cumulative
     }
 
+    /// Remaining releasable basis points (`10000 - released_bps`); 10000 when untouched.
+    /// Pure view: `released + remaining == 10000` always. Poll before submitting
+    /// `release_tranche` to avoid over-release panics.
+    pub fn get_tranche_remaining_bps(env: Env, invoice_id: u64) -> u32 {
+        let released: u32 = env.storage().persistent().get::<(Symbol,u64), TrancheState>(&tranche_key(invoice_id)).map(|s| s.released_bps).unwrap_or(0);
+        10_000u32.checked_sub(released).expect("tranche: underflow in remaining")
+    }
+
     /// Cumulative released basis points for `invoice_id` (0 when untouched).
     pub fn get_released_bps(env: Env, invoice_id: u64) -> u32 {
         env.storage().persistent().get::<(Symbol,u64), TrancheState>(&tranche_key(invoice_id)).map(|s| s.released_bps).unwrap_or(0)
