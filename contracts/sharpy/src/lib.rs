@@ -1179,6 +1179,14 @@ impl SharpyContract {
         count
     }
 
+    /// True when the invoice is terminal (Released/Refunded/Cancelled).
+    /// Pure view: `get_ttl_hint == 0` on terminal invoices is expected, not expiry.
+    /// Use with `is_invoice_expired` to distinguish expired-pending (refundable)
+    /// from terminal (nothing to do).
+    pub fn is_invoice_terminal(env: Env, invoice_id: u64) -> bool {
+        load_invoice(&env, invoice_id).status != InvoiceStatus::Pending
+    }
+
     /// Read-only deadline-expiry check mirroring the `refund`/`refund_batch` trigger.
     /// Returns true only when the invoice is still Pending and `timestamp > deadline`.
     /// Pure view — emits no events. Indexers and UIs should poll this to decide
