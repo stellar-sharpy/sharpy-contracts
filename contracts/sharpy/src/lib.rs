@@ -1350,7 +1350,9 @@ impl SharpyContract {
             }
         }
         let unvested = state.amount.checked_sub(state.vested).expect("stream: underflow in amount - vested");
-        let withdraw_amount = total_vested.min(unvested).max(0i128);
+        // Time-accounting edge: subtract already-vested so repeat withdraws at the
+        // same timestamp are no-ops instead of double-counting total_vested.
+        let withdraw_amount = total_vested.saturating_sub(state.vested).min(unvested).max(0i128);
         state.vested = state.vested.checked_add(withdraw_amount).expect("stream: overflow in vested + withdraw");
         env.storage().persistent().set(&key, &state);
         let rc = recipient.clone();
@@ -1552,7 +1554,7 @@ impl SharpyContract {
                 total_vested = state.amount.checked_mul(elapsed as i128).expect("stream: overflow in amount * elapsed").checked_div(total_duration as i128).expect("stream: division failed").max(0i128);
             }
         }
-        total_vested.min(state.amount.checked_sub(state.vested).expect("stream: underflow")).max(0i128)
+        total_vested.saturating_sub(state.vested).min(state.amount.checked_sub(state.vested).expect("stream: underflow")).max(0i128)
     }
 }
 
