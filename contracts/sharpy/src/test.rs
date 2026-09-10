@@ -5843,7 +5843,7 @@ mod test_fee_consistency_b {
         let r = Address::generate(&env);
         let tok = Address::generate(&env);
         let dl = env.ledger().timestamp() + 86400;
-        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
         let id = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [8000i128]), &Vec::from_array(&env, [tok]), &dl, &opts);
         let a = client.preview_fee_for_invoice(&id);
         let b = client.preview_fee_for_invoice(&id);
