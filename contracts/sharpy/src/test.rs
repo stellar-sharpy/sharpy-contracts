@@ -5800,3 +5800,54 @@ mod test_fee_consistency_a {
         assert_eq!(client.preview_fee_for_invoice(&id), client.preview_fee(&10_000i128));
     }
 }
+
+#[cfg(test)]
+mod test_fee_consistency_b {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk2(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let r1 = Address::generate(env);
+        let r2 = Address::generate(env);
+        let t1 = Address::generate(env);
+        let t2 = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r1, r2]), &Vec::from_array(env, [6000i128, 4000i128]), &Vec::from_array(env, [t1, t2]), &dl, &opts)
+    }
+    #[test]
+    fn test_multi_recipient_total_preview_matches() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&1000u32, &collector);
+        let id = mk2(&env, &client, &creator);
+        assert_eq!(client.preview_fee_for_invoice(&id), client.preview_fee(&10_000i128));
+        assert_eq!(client.preview_fee_for_invoice(&id), 1000i128);
+    }
+    #[test]
+    fn test_preview_is_pure_double_call() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let collector = Address::generate(&env);
+        client.set_protocol_fee(&250u32, &collector);
+        let r = Address::generate(&env);
+        let tok = Address::generate(&env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [8000i128]), &Vec::from_array(&env, [tok]), &dl, &opts);
+        let a = client.preview_fee_for_invoice(&id);
+        let b = client.preview_fee_for_invoice(&id);
+        assert_eq!(a, b);
+        assert_eq!(a, 200i128);
+    }
+}
