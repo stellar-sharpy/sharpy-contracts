@@ -3,6 +3,7 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
+- feat(contract): `get_audit_count(id)` + whitelist audit entries (`wlist`/`wrem`) + `inv_upd` ordering docs; per-path emission proof — feat/invupd-coverage (closes #198)
 - feat(contract): `is_invoice_terminal(id)` view + ttl-hint terminal/expired-mirror coverage (countdown, Released/Refunded/Cancelled zeros, extend revives) — feat/ttl-terminal (closes #197)
 - feat(contract): `get_creator_invoice_total` + `get_payer_invoice_total` O(1) totals; empty-page/total consistency proof — feat/paged-totals (closes #196)
 - feat(contract): `get_fee_bps()` rate view + preview-vs-invoice consistency proof (emitting vs silent share math, release untouched) — feat/fee-consistency (closes #195)
