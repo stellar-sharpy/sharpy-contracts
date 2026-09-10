@@ -749,6 +749,8 @@ impl SharpyContract {
     }
 
     /// Seconds until `deadline` for a Pending invoice — 0 when expired or terminal.
+    /// Terminal zeros pair with `is_invoice_terminal`; expired-pending zeros pair
+    /// with `is_invoice_expired == true` (refund submittable).
     /// Pure observability view (no state change, no events) for long-lived invoice
     /// dashboards: poll alongside `is_invoice_expired` and submit `bump_invoice_ttl`
     /// (storage keep-alive) or `extend_deadline` (push the deadline out) while the
