@@ -153,3 +153,24 @@ All payout math uses `checked_mul`/`checked_div`/`checked_add`/`checked_sub` to 
 - `contracts/sharpy/src/events.rs` — typed event helpers
 - `contracts/sharpy/src/types.rs` — `Invoice`, `SplitRule`, `DisputeState`, etc.
 - `contracts/sharpy/src/test.rs` — 184 unit/integration tests
+
+## Auth Matrix (audit harness, closes #199)
+
+| Entry | Auth | Rationale |
+|-------|------|-----------|
+| `initialize` | once, no auth | sets admin/treasury singletons |
+| `pause`/`unpause` | admin | circuit breaker |
+| `create_*` | creator | creator-indexed |
+| `pay`/`pool_pay`/`pay_with_tip` | payer + whitelist | sequential guard prevents double-spend |
+| `release`/`refund`/`refund_batch` | permissionless | deadline/status gates; payouts fixed to stored parties |
+| `release_escrow`/`dispute`/`resolve` | creator/arbitrator | escrow state gates |
+| `cancel`/`freeze`/`set_*`/`extend`/`archive` | creator (freeze admin) | mutators append audit + `inv_upd` |
+| `claim` | permissionless | CEI: remove before transfer |
+| `create_stream`/`withdraw`/`top_up`/`cancel_stream` | permissionless (documented) | scratch state keyed by id; future major may gate |
+| `set_route` | any authed caller | repoint allowed; self/2-cycle panic; bounded resolve |
+
+## CEI Checklist
+
+- `claim`: checks balance>0, effects remove, interactions transfer last.
+- `_release`: status assert first, distribution via try_transfer+fallback, status write after.
+- `_refund_payers`: aggregation then transfers; status transition makes retry panic.
