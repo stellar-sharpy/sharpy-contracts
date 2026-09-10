@@ -6344,3 +6344,43 @@ mod test_invariant_a {
         client.pay(&payer, &id, &200i128);
     }
 }
+
+#[cfg(test)]
+mod test_invariant_b {
+    use soroban_sdk::{testutils::Address as _, token, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    #[test]
+    #[should_panic(expected = "invoice is not pending")]
+    fn test_double_release_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let tok = env.register_stellar_asset_contract(admin);
+        token::StellarAssetClient::new(&env, &tok).mint(&payer, &5000i128);
+        let r = Address::generate(&env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(&env), auto_resolve_rules: Vec::new(&env), arbitrator: None };
+        let id = client.create_invoice(&creator, &Vec::from_array(&env, [r]), &Vec::from_array(&env, [500i128]), &Vec::from_array(&env, [tok]), &dl, &opts);
+        client.pay(&payer, &id, &500i128);
+        client.release(&id);
+    }
+    #[test]
+    #[should_panic(expected = "no claimable balance")]
+    fn test_double_claim_panics() {
+        let (env, client) = setup();
+        let who = Address::generate(&env);
+        let tok = Address::generate(&env);
+        client.claim(&who, &tok);
+    }
+}
