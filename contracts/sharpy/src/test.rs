@@ -5492,3 +5492,132 @@ mod test_route_chain_c {
         assert_eq!(client.resolve_route_chain(&a, &5u32), c);
     }
 }
+
+#[cfg(test)]
+mod test_tranche_invariant_a {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    fn test_remaining_starts_full() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        assert_eq!(client.get_released_bps(&id), 0u32);
+        assert_eq!(client.get_tranche_remaining_bps(&id), 10_000u32);
+    }
+    #[test]
+    fn test_partial_sums_to_full() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        assert_eq!(client.release_tranche(&creator, &id, &3000u32), 3000u32);
+        assert_eq!(client.get_tranche_remaining_bps(&id), 7000u32);
+        assert_eq!(client.release_tranche(&creator, &id, &7000u32), 10_000u32);
+        assert_eq!(client.get_tranche_remaining_bps(&id), 0u32);
+    }
+}
+
+#[cfg(test)]
+mod test_tranche_invariant_b {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    #[should_panic(expected = "tranches exceed 100%")]
+    fn test_over_release_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &id, &6000u32);
+        client.release_tranche(&creator, &id, &5000u32);
+    }
+    #[test]
+    fn test_small_steps_accumulate_exactly() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        let mut cum = 0u32;
+        for _ in 0..10 {
+            cum = client.release_tranche(&creator, &id, &1000u32);
+        }
+        assert_eq!(cum, 10_000u32);
+        assert_eq!(client.get_released_bps(&id) + client.get_tranche_remaining_bps(&id), 10_000u32);
+    }
+}
+
+#[cfg(test)]
+mod test_tranche_invariant_c {
+    use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let dl = env.ledger().timestamp() + 86400;
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    fn test_tranche_isolated_per_invoice() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let a = mk(&env, &client, &creator);
+        let b = mk(&env, &client, &creator);
+        client.release_tranche(&creator, &a, &2500u32);
+        assert_eq!(client.get_released_bps(&a), 2500u32);
+        assert_eq!(client.get_tranche_remaining_bps(&a), 7500u32);
+        assert_eq!(client.get_released_bps(&b), 0u32);
+        assert_eq!(client.get_tranche_remaining_bps(&b), 10_000u32);
+    }
+    #[test]
+    #[should_panic(expected = "only creator can release tranches")]
+    fn test_non_creator_tranche_panics() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let other = Address::generate(&env);
+        let id = mk(&env, &client, &creator);
+        client.release_tranche(&other, &id, &100u32);
+    }
+}
