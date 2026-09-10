@@ -37,7 +37,7 @@ instance storage (no TTL); every per-invoice entry plus the counters lives in pe
 | `("wlist", id)` | `WhitelistState` | persistent | Payer allowlist enforced in `pay` via `set/get/add/remove_whitelisted_payer` |
 | `fee` | `FeeConfig` | instance | Protocol fee bps + collector via `set/get_protocol_fee`/`preview_fee` |
 
-TTL extension: `save_invoice`, creator/payer index writes, `credit_account`, `bump_invoice_ttl`, `set_invoice_notes`,
+TTL extension: `save_invoice`, creator/payer index writes, `credit_account`, `bump_invoice_ttl`, `get_funding_remaining` reads need no TTL, `set_invoice_notes`,
 `set_invoice_tags`, `set_invoice_memo_ext`, `set_invoice_metadata` and `set_discount` call
 `extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
 Instance singletons (`admin`, `treasury`, `fee`) carry no TTL; escrow, recurring, pause, approval, archival,
