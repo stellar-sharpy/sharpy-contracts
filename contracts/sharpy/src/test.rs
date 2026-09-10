@@ -6023,3 +6023,46 @@ mod test_paged_total_c {
         assert_eq!(page.len(), 1u32);
     }
 }
+
+#[cfg(test)]
+mod test_ttl_terminal_a {
+    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env, Vec};
+    use crate::SharpyContractClient;
+    fn setup() -> (Env, SharpyContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register(crate::SharpyContract, ());
+        let c = SharpyContractClient::new(&env, &cid);
+        let a = Address::generate(&env);
+        let t = Address::generate(&env);
+        c.initialize(&a, &t);
+        (env, c)
+    }
+    fn mk(env: &Env, client: &SharpyContractClient<'_>, creator: &Address, dl: u64) -> u64 {
+        let r = Address::generate(env);
+        let tok = Address::generate(env);
+        let opts = crate::types::InvoiceOptions { escrow_enabled: false, escrow_release_delay: None, split_rules: Vec::new(env), auto_resolve_rules: Vec::new(env), arbitrator: None };
+        client.create_invoice(creator, &Vec::from_array(env, [r]), &Vec::from_array(env, [100i128]), &Vec::from_array(env, [tok]), &dl, &opts)
+    }
+    #[test]
+    fn test_countdown_exact() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let id = mk(&env, &client, &creator, now + 1000);
+        assert_eq!(client.get_ttl_hint(&id), 1000u64);
+        assert!(!client.is_invoice_terminal(&id));
+        assert!(!client.is_invoice_expired(&id));
+    }
+    #[test]
+    fn test_expired_pending_hint_zero_and_refundable() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let now = env.ledger().timestamp();
+        let id = mk(&env, &client, &creator, now + 10);
+        env.ledger().set_timestamp(now + 11);
+        assert_eq!(client.get_ttl_hint(&id), 0u64);
+        assert!(client.is_invoice_expired(&id));
+        assert!(!client.is_invoice_terminal(&id));
+    }
+}
