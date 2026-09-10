@@ -1535,6 +1535,25 @@ impl SharpyContract {
     pub fn get_stream_state(env: Env, invoice_id: u64) -> Option<StreamingState> {
         env.storage().persistent().get::<(Symbol,u64), StreamingState>(&streaming_key(invoice_id))
     }
+
+    /// Pure preview of the currently withdrawable vested amount.
+    /// Mirrors `withdraw_vested` cliff-gated linear math exactly
+    /// (`amount * elapsed / duration`, capped by unvested remainder) but
+    /// performs no state change and emits no events. Poll before submitting
+    /// `withdraw_vested`; a 0 preview means nothing is claimable yet.
+    pub fn preview_vested(env: Env, invoice_id: u64) -> i128 {
+        let state: StreamingState = env.storage().persistent().get::<(Symbol,u64), StreamingState>(&streaming_key(invoice_id)).expect("no stream");
+        let now = env.ledger().timestamp();
+        let mut total_vested = 0i128;
+        if now >= state.cliff_at {
+            let total_duration = state.end_at.saturating_sub(state.start_at);
+            let elapsed = now.saturating_sub(state.start_at);
+            if total_duration > 0 {
+                total_vested = state.amount.checked_mul(elapsed as i128).expect("stream: overflow in amount * elapsed").checked_div(total_duration as i128).expect("stream: division failed").max(0i128);
+            }
+        }
+        total_vested.min(state.amount.checked_sub(state.vested).expect("stream: underflow")).max(0i128)
+    }
 }
 
 /// Validates that a token address is not the zero address.
