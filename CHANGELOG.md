@@ -3,6 +3,7 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
+- docs(arch/changelog): sync storage/event taxonomy + module-map counts; storage-key and view release-notes proof — feat/release-sync (closes #200)
 - feat(contract): `get_funding_remaining(id)` invariant view + auth-matrix/CEI docs; double-release/refund/claim + remaining guards — feat/audit-harness (closes #199)
 - feat(contract): `get_audit_count(id)` + whitelist audit entries (`wlist`/`wrem`) + `inv_upd` ordering docs; per-path emission proof — feat/invupd-coverage (closes #198)
 - feat(contract): `is_invoice_terminal(id)` view + ttl-hint terminal/expired-mirror coverage (countdown, Released/Refunded/Cancelled zeros, extend revives) — feat/ttl-terminal (closes #197)
