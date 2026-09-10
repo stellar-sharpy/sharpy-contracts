@@ -1534,6 +1534,55 @@ impl SharpyContract {
     /// Return the streaming state for `invoice_id`, if any.
     /// Pure view for dashboards: exposes cliff-gated vesting params plus
     /// already-vested accounting without mutating state or emitting events.
+    /// Follow route hops up to `max_depth`; cycle-safe and depth-capped.
+    /// Returns the final reachable target (or the start id when unrouted /
+    /// depth exhausted / cycle detected). Never loops: visited-set breaks
+    /// cycles and the loop is bounded by `max_depth` (plus a 32-hop cap).
+    /// `resolve_route` behavior is unchanged; use this for multi-hop chains.
+    pub fn resolve_route_chain(env: Env, invoice_id: u64, max_depth: u32) -> u64 {
+        let mut cur = invoice_id;
+        let mut seen: u32 = 0;
+        let mut visited: Vec<u64> = Vec::new(&env);
+        visited.push_back(cur);
+        while seen < max_depth {
+            let next: Option<ComposableRoute> = env.storage().persistent().get::<(Symbol,u64), ComposableRoute>(&route_key(cur));
+            match next {
+                None => break,
+                Some(r) => {
+                    if visited.contains(&r.target_invoice) { break; }
+                    visited.push_back(r.target_invoice);
+                    cur = r.target_invoice;
+                    if visited.len() > 32 { break; }
+                }
+            }
+            seen += 1;
+        }
+        cur
+    }
+
+    /// Number of hops reachable from `invoice_id` (cycle-safe, capped at 32).
+    /// 0 when unrouted. Pure view for dashboards validating chain length.
+    pub fn get_route_chain_len(env: Env, invoice_id: u64) -> u32 {
+        let mut cur = invoice_id;
+        let mut len: u32 = 0;
+        let mut visited: Vec<u64> = Vec::new(&env);
+        visited.push_back(cur);
+        loop {
+            if len >= 32 { break; }
+            let next: Option<ComposableRoute> = env.storage().persistent().get::<(Symbol,u64), ComposableRoute>(&route_key(cur));
+            match next {
+                None => break,
+                Some(r) => {
+                    if visited.contains(&r.target_invoice) { break; }
+                    visited.push_back(r.target_invoice);
+                    cur = r.target_invoice;
+                    len += 1;
+                }
+            }
+        }
+        len
+    }
+
     pub fn get_stream_state(env: Env, invoice_id: u64) -> Option<StreamingState> {
         env.storage().persistent().get::<(Symbol,u64), StreamingState>(&streaming_key(invoice_id))
     }
