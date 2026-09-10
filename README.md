@@ -185,7 +185,7 @@ sharpy-contracts/
 │       ├── lib.rs                   # All contract logic (600+ lines)
 │       ├── types.rs                 # Invoice, SplitRule, AuditEntry, etc.
 │       ├── events.rs                # Structured event helpers
-│       └── test.rs                  # 184 unit tests (streaming, routing, tranche, whitelist, fee-module)
+│       └── test.rs                  # 292 unit tests (streaming, routing, tranche, whitelist, fee-module, pagination, ttl, audit)
 └── .github/
     ├── workflows/ci.yml             # Test + WASM build on every PR
     └── ISSUE_TEMPLATE/              # Bug report, feature request
