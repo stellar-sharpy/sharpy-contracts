@@ -37,7 +37,7 @@ instance storage (no TTL); every per-invoice entry plus the counters lives in pe
 | `("wlist", id)` | `WhitelistState` | persistent | Payer allowlist enforced in `pay` via `set/get/add/remove_whitelisted_payer` |
 | `fee` | `FeeConfig` | instance | Protocol fee bps + collector via `set/get_protocol_fee`/`preview_fee` |
 
-TTL extension: `save_invoice`, creator/payer index writes, `credit_account`, `bump_invoice_ttl`, `set_invoice_notes`,
+TTL extension: `save_invoice`, creator/payer index writes, `credit_account`, `bump_invoice_ttl`, `get_funding_remaining` reads need no TTL, `set_invoice_notes`,
 `set_invoice_tags`, `set_invoice_memo_ext`, `set_invoice_metadata` and `set_discount` call
 `extend_ttl(100_000, 6_307_200)` — bump to ~1 year if TTL < 100k ledgers (~6 days, CAP-78).
 Instance singletons (`admin`, `treasury`, `fee`) carry no TTL; escrow, recurring, pause, approval, archival,
@@ -136,6 +136,9 @@ All events use single-element topic `symbol_short!`.
 | `wrem` | `WhitelistPayerRemovedEvent{invoice_id, payer}` | `remove_whitelisted_payer` |
 | `fee` | `FeeConfiguredEvent{fee_bps, collector}` | `set_protocol_fee` |
 | `fprev` | `FeePreviewedEvent{amount, fee}` | `preview_fee` |
+| `paged` | _(no event; views)_ `get_creator_invoices_paged`/`get_payer_invoices_paged` + `*_total` | paged reads |
+| `ttl` | _(no event; views)_ `get_ttl_hint`/`is_invoice_expired`/`is_invoice_terminal` | ttl reads |
+| `audit` | _(no event; views)_ `get_audit_count`/`get_funding_remaining`/`get_fee_bps` | invariant reads |
 
 ## Checked Arithmetic (CAP-82)
 
@@ -152,7 +155,7 @@ All payout math uses `checked_mul`/`checked_div`/`checked_add`/`checked_sub` to 
 - `contracts/sharpy/src/lib.rs` — contract impl, storage helpers, `SharpyContract`
 - `contracts/sharpy/src/events.rs` — typed event helpers
 - `contracts/sharpy/src/types.rs` — `Invoice`, `SplitRule`, `DisputeState`, etc.
-- `contracts/sharpy/src/test.rs` — 184 unit/integration tests
+- `contracts/sharpy/src/test.rs` — 280+ unit/integration tests (stream/route/tranche/whitelist/fee/pagination/ttl/invariant suites)
 
 ## Auth Matrix (audit harness, closes #199)
 
