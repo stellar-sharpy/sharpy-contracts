@@ -4,7 +4,7 @@
 ![Rust](https://img.shields.io/badge/Rust-stable-orange?logo=rust)
 ![Tests](https://img.shields.io/badge/tests-292%20passing-00D4AA)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.3.0-6C63FF)
+![Version](https://img.shields.io/badge/version-0.4.0-6C63FF)
 [![Demo](https://img.shields.io/badge/Demo-Watch%20on%20Loom-00D4AA?logo=loom)](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
 
 Soroban smart contract powering the Sharpy split payment protocol on Stellar. Handles invoice creation, multi-recipient fund distribution, escrow management, recurring billing, and agentic payment integration.
@@ -18,10 +18,10 @@ Soroban smart contract powering the Sharpy split payment protocol on Stellar. Ha
 
 | Network | Contract ID | Status |
 |---------|-------------|--------|
-| Testnet | `CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T` | Live (v0.3.0, 2026-09-04, 184-test build; 292-test `main` pending redeploy) |
+| Testnet | `CC7A47PH7MTE4FVYOLN35JAWFL45IVTRS3VMWXJINAM2KUQ6JDEYQPXK` | Live (v0.4.0, 2026-09-15, 292-test build) |
 | Mainnet | Coming soon | Pending |
 
-- [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T)
+- [Testnet Explorer](https://stellar.expert/explorer/testnet/contract/CC7A47PH7MTE4FVYOLN35JAWFL45IVTRS3VMWXJINAM2KUQ6JDEYQPXK)
 - [Frontend dApp](https://sharpy-sigma.vercel.app)
 - [Pitch Deck](https://gamma.app/docs/Split-Payments-on-Stellar-s0et8z1agtva59n)
 - [Demo Video](https://www.loom.com/share/09aa4a78e0c944dcab866a7036fde24d)
@@ -211,7 +211,7 @@ make deploy-mainnet # deploy to mainnet
 |-------------|----------|--------|
 | 26.1.0 | 27 | Current |
 
-Crate `sharpy` is 0.3.0 (`contracts/sharpy/Cargo.toml`). On-chain schema versions are
+Crate `sharpy` is 0.4.0 (`contracts/sharpy/Cargo.toml`). On-chain schema versions are
 independent: `get_contract_version()` returns 1 and `get_invoice_version(id)` returns 1.
 
 ---

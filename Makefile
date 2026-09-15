@@ -2,7 +2,7 @@
 
 WASM=target/wasm32v1-none/release/sharpy.wasm
 OPTIMIZED=target/wasm32v1-none/release/sharpy.optimized.wasm
-TESTNET_ID=CAEWQX36RLGP2WY6ACOREDJEIGELYV3HWWUPGV3CJMC27OWGQWZHTH6T
+TESTNET_ID=CC7A47PH7MTE4FVYOLN35JAWFL45IVTRS3VMWXJINAM2KUQ6JDEYQPXK
 
 build:
 	cargo build --release --target wasm32v1-none
