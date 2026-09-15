@@ -3,6 +3,9 @@
 All notable changes to the Sharpy smart contract are documented here.
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-09-15
+- deploy: testnet `CC7A47PH7MTE4FVYOLN35JAWFL45IVTRS3VMWXJINAM2KUQ6JDEYQPXK` (292-test build, WASM `1aac68ff…acd1ac4f`); initialized admin+treasury alice `GDG52…STOVCT`; verified `get_invoice_count=0`, `get_treasury`, `get_fee_bps=0`, `get_creator_invoice_total=0` (closes #213)
 - docs(arch/changelog): sync storage/event taxonomy + module-map counts; storage-key and view release-notes proof — feat/release-sync (closes #200)
 - feat(contract): `get_funding_remaining(id)` invariant view + auth-matrix/CEI docs; double-release/refund/claim + remaining guards — feat/audit-harness (closes #199)
 - feat(contract): `get_audit_count(id)` + whitelist audit entries (`wlist`/`wrem`) + `inv_upd` ordering docs; per-path emission proof — feat/invupd-coverage (closes #198)
